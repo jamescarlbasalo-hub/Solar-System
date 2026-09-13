@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}Calendar — SchoolSync{% endblock %}
+{% block content %}
+
+<header class="page-head cal-head">
+  <div>
+    <h1>{{ month_name }} {{ year }}</h1>
+    <p class="page-sub">Click a date to see what's happening that day.</p>
+  </div>
+  <div class="cal-nav">
+    <a href="{{ url_for('calendar_view', year=prev_year, month=prev_month) }}" class="btn btn-small">← Prev</a>
+    <a href="{{ url_for('calendar_view') }}" class="btn btn-small">Today</a>
+    <a href="{{ url_for('calendar_view', year=next_year, month=next_month) }}" class="btn btn-small">Next →</a>
+    {% if current_user.role in ['admin', 'staff'] %}
+      <a href="{{ url_for('new_event') }}" class="btn btn-primary btn-small">+ New Event</a>
+    {% endif %}
+  </div>
+</header>
+
+<div class="calendar-grid">
+  <div class="cal-weekday">Sun</div>
+  <div class="cal-weekday">Mon</div>
+  <div class="cal-weekday">Tue</div>
+  <div class="cal-weekday">Wed</div>
+  <div class="cal-weekday">Thu</div>
+  <div class="cal-weekday">Fri</div>
+  <div class="cal-weekday">Sat</div>
+
+  {% for week in weeks %}
+    {% for day in week %}
+      {% if day == 0 %}
+        <div class="cal-cell cal-empty"></div>
+      {% else %}
+        {% set date_str = "%04d-%02d-%02d"|format(year, month, day) %}
+        {% set day_events = events_by_day.get(date_str, []) %}
+        {% set is_today = (year == today.year and month == today.month and day == today.day) %}
+        <a href="{{ url_for('calendar_day', date_str=date_str) }}" class="cal-cell {{ 'cal-today' if is_today else '' }} {{ 'has-events' if day_events else '' }}">
+          <span class="cal-day-num">{{ day }}</span>
+          {% if day_events %}
+            <div class="cal-dots">
+              {% for e in day_events[:3] %}
+                <span class="cal-dot status-{{ e.status | lower }}" title="{{ e.title }}"></span>
+              {% endfor %}
+              {% if day_events|length > 3 %}<span class="cal-more">+{{ day_events|length - 3 }}</span>{% endif %}
+            </div>
+          {% endif %}
+        </a>
+      {% endif %}
+    {% endfor %}
+  {% endfor %}
+</div>
+
+<div class="cal-legend">
+  <span><i class="cal-dot status-approved"></i> Approved</span>
+  {% if current_user.role in ['admin', 'staff'] %}
+    <span><i class="cal-dot status-pending"></i> Pending</span>
+    <span><i class="cal-dot status-rejected"></i> Rejected</span>
+  {% endif %}
+</div>
+
+{% endblock %}

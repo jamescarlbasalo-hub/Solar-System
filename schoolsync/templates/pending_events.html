@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}Pending Approvals — SchoolSync{% endblock %}
+{% block content %}
+
+<header class="page-head">
+  <h1>Pending Approvals</h1>
+  <p class="page-sub">Events submitted by Staff, waiting for your review.</p>
+</header>
+
+<div class="table-wrap">
+  <table class="data-table">
+    <thead><tr><th>Title</th><th>Date</th><th>Location</th><th></th></tr></thead>
+    <tbody>
+    {% for e in events %}
+      <tr>
+        <td><a href="{{ url_for('event_detail', event_id=e.id) }}">{{ e.title }}</a></td>
+        <td>{{ e.date }} · {{ e.start_time }}–{{ e.end_time }}</td>
+        <td>{{ e.location }}</td>
+        <td class="row-actions">
+          <form method="POST" action="{{ url_for('approve_event', event_id=e.id) }}">
+            <button type="submit" class="btn btn-small btn-good">Approve</button>
+          </form>
+          <form method="POST" action="{{ url_for('reject_event', event_id=e.id) }}">
+            <button type="submit" class="btn btn-small btn-warn">Reject</button>
+          </form>
+        </td>
+      </tr>
+    {% else %}
+      <tr><td colspan="4" class="empty-state">Nothing waiting for review.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% endblock %}

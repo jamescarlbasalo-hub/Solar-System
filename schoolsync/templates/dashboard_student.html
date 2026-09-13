@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}Student Dashboard — SchoolSync{% endblock %}
+{% block content %}
+
+<header class="page-head">
+  <h1>Welcome, {{ current_user.name.split(' ')[0] }}</h1>
+  <p class="page-sub">Here's what's happening at school.</p>
+</header>
+
+<section class="quick-links">
+  <a href="{{ url_for('calendar_view') }}" class="btn btn-primary">📅 View Full Calendar</a>
+</section>
+
+<section class="two-col">
+  <div>
+    <h2>Today's Events</h2>
+    {% if todays %}
+      <div class="event-list">
+        {% for e in todays %}
+        <a href="{{ url_for('event_detail', event_id=e.id) }}" class="event-card">
+          <div class="event-card-top"><b>{{ e.title }}</b></div>
+          <div class="event-card-meta">{{ e.start_time }} – {{ e.end_time }} · {{ e.location }}</div>
+        </a>
+        {% endfor %}
+      </div>
+    {% else %}
+      <p class="empty-state">Nothing scheduled for today.</p>
+    {% endif %}
+  </div>
+
+  <div>
+    <h2>Upcoming Events</h2>
+    {% if upcoming %}
+      <div class="event-list">
+        {% for e in upcoming %}
+        <a href="{{ url_for('event_detail', event_id=e.id) }}" class="event-card">
+          <div class="event-card-top"><b>{{ e.title }}</b></div>
+          <div class="event-card-meta">{{ e.date }} · {{ e.start_time }}–{{ e.end_time }} · {{ e.location }}</div>
+        </a>
+        {% endfor %}
+      </div>
+    {% else %}
+      <p class="empty-state">No upcoming events yet.</p>
+    {% endif %}
+  </div>
+</section>
+
+<section class="notice-card">
+  <b>Not built yet:</b> Announcements — coming next.
+</section>
+
+{% endblock %}

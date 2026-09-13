@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}Log in — SchoolSync{% endblock %}
+{% block content %}
+<div class="auth-screen">
+  <div class="auth-card">
+    <div class="auth-mark">🎓</div>
+    <h1>SchoolSync</h1>
+    <p class="auth-sub">School Event Calendar &amp; Announcement System</p>
+
+    <form method="POST" action="{{ url_for('login') }}" class="auth-form">
+      <label for="email">Email</label>
+      <input type="email" id="email" name="email" placeholder="e.g. admin@schoolsync.edu" autocomplete="username" required>
+
+      <label for="password">Password</label>
+      <input type="password" id="password" name="password" placeholder="••••••••" autocomplete="current-password" required>
+
+      <button type="submit" class="btn btn-primary btn-block">Log in</button>
+    </form>
+    <p class="switch-auth">New here? <a href="{{ url_for('signup') }}">Create a student account</a></p>
+
+    <!--<div class="demo-accounts">
+      <div class="demo-title">Demo accounts (after running seed.py)</div>
+      <div class="demo-grid">
+        <div class="demo-item"><b>Admin</b><span>admin@schoolsync.edu / admin123</span></div>
+        <div class="demo-item"><b>Staff</b><span>staff@schoolsync.edu / staff123</span></div>
+        <div class="demo-item"><b>Student</b><span>student@schoolsync.edu / student123</span></div>
+      </div>
+    </div>-->
+  </div>
+</div>
+{% endblock %}

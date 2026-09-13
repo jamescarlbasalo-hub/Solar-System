@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+{% block title %}Admin Dashboard — SchoolSync{% endblock %}
+{% block content %}
+
+<header class="page-head">
+  <h1>Admin Dashboard</h1>
+  <p class="page-sub">Overview of events, announcements, and accounts.</p>
+</header>
+
+<section class="stat-row">
+  <div class="stat-card">
+    <div class="stat-value">{{ stats.total_events }}</div>
+    <div class="stat-label">Total Events</div>
+  </div>
+  <div class="stat-card stat-warn">
+    <div class="stat-value">{{ stats.pending_events }}</div>
+    <div class="stat-label">Pending Events</div>
+  </div>
+  <div class="stat-card stat-good">
+    <div class="stat-value">{{ stats.approved_events }}</div>
+    <div class="stat-label">Approved Events</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-value">{{ stats.total_students }}</div>
+    <div class="stat-label">Total Students</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-value">{{ stats.total_staff }}</div>
+    <div class="stat-label">Total Staff</div>
+  </div>
+</section>
+
+<section class="quick-links">
+  <a href="{{ url_for('calendar_view') }}" class="btn">📅 View Calendar</a>
+  <a href="{{ url_for('pending_events') }}" class="btn">🕓 Pending Approvals</a>
+  <a href="{{ url_for('manage_accounts') }}" class="btn">👤 Manage Accounts</a>
+  <a href="{{ url_for('new_event') }}" class="btn btn-primary">+ New Event</a>
+</section>
+
+{% if recent_pending %}
+<section class="recent-section">
+  <h2>Needs your review</h2>
+  <div class="table-wrap">
+    <table class="data-table">
+      <thead><tr><th>Title</th><th>Date</th><th></th></tr></thead>
+      <tbody>
+      {% for e in recent_pending %}
+        <tr>
+          <td><a href="{{ url_for('event_detail', event_id=e.id) }}">{{ e.title }}</a></td>
+          <td>{{ e.date }}</td>
+          <td class="row-actions">
+            <form method="POST" action="{{ url_for('approve_event', event_id=e.id) }}">
+              <button type="submit" class="btn btn-small btn-good">Approve</button>
+            </form>
+            <form method="POST" action="{{ url_for('reject_event', event_id=e.id) }}">
+              <button type="submit" class="btn btn-small btn-warn">Reject</button>
+            </form>
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endif %}
+
+<section class="notice-card">
+  <b>Not built yet:</b> the Announcements module. Everything else from the
+  plan — accounts, events, approval, calendar — is live.
+</section>
+
+{% endblock %}

@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block title %}Manage Accounts — SchoolSync{% endblock %}
+{% block content %}
+
+<header class="page-head">
+  <h1>Manage Accounts</h1>
+  <p class="page-sub">Every account in the system — students self-signed-up, or added here.</p>
+</header>
+
+<section class="two-col">
+  <div class="form-card">
+    <h2>Add a Staff or Admin account</h2>
+    <p class="hint-text">Students sign themselves up — this form is for accounts that need Staff or Admin access.</p>
+    <form method="POST" action="{{ url_for('manage_accounts') }}">
+      <label for="name">Full name</label>
+      <input type="text" id="name" name="name" placeholder="e.g. Mr. Santos" required>
+
+      <label for="email">Email</label>
+      <input type="email" id="email" name="email" placeholder="e.g. santos@schoolsync.edu" required>
+
+      <label for="password">Password</label>
+      <input type="password" id="password" name="password" placeholder="Minimum 6 characters" minlength="6" required>
+
+      <label for="role">Role</label>
+      <select id="role" name="role" required>
+        <option value="staff">Staff</option>
+        <option value="admin">Admin</option>
+        <option value="student">Student</option>
+      </select>
+
+      <button type="submit" class="btn btn-primary">Create account</button>
+    </form>
+  </div>
+
+  <div class="list-card">
+    <h2>All accounts ({{ users|length }})</h2>
+    <table class="data-table">
+      <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Joined</th><th></th></tr></thead>
+      <tbody>
+      {% for u in users %}
+        <tr>
+          <td>{{ u.name }}</td>
+          <td>{{ u.email }}</td>
+          <td><span class="role-badge role-{{ u.role }}">{{ u.role | capitalize }}</span></td>
+          <td>{{ u.created_at[:10] }}</td>
+          <td>
+            {% if u.id != current_user.id %}
+            <form method="POST" action="{{ url_for('delete_account', user_id=u.id) }}" onsubmit="return confirm('Delete {{ u.email }}?');">
+              <button type="submit" class="btn btn-small btn-ghost-danger">Delete</button>
+            </form>
+            {% else %}
+              <span class="hint-text">(you)</span>
+            {% endif %}
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+{% endblock %}

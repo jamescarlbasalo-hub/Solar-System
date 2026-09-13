@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{% block title %}SchoolSync{% endblock %}</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@600;700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+
+{% if current_user %}
+<header class="navbar">
+  <div class="navbar-inner">
+    <a href="{{ url_for('index') }}" class="brand">
+      <span class="brand-mark">🎓</span> SchoolSync
+    </a>
+
+    <nav class="nav-links">
+      {% if current_user.role == 'admin' %}
+        <a href="{{ url_for('admin_dashboard') }}" class="{{ 'active' if request.endpoint == 'admin_dashboard' else '' }}">Dashboard</a>
+        <a href="{{ url_for('calendar_view') }}" class="{{ 'active' if request.endpoint in ['calendar_view','calendar_day'] else '' }}">Calendar</a>
+        <a href="{{ url_for('pending_events') }}" class="{{ 'active' if request.endpoint == 'pending_events' else '' }}">Pending Approvals</a>
+        <a href="{{ url_for('manage_accounts') }}" class="{{ 'active' if request.endpoint == 'manage_accounts' else '' }}">Manage Accounts</a>
+      {% elif current_user.role == 'staff' %}
+        <a href="{{ url_for('staff_dashboard') }}" class="{{ 'active' if request.endpoint == 'staff_dashboard' else '' }}">Dashboard</a>
+        <a href="{{ url_for('calendar_view') }}" class="{{ 'active' if request.endpoint in ['calendar_view','calendar_day'] else '' }}">Calendar</a>
+        <a href="{{ url_for('my_events') }}" class="{{ 'active' if request.endpoint == 'my_events' else '' }}">My Events</a>
+        <a href="{{ url_for('new_event') }}" class="{{ 'active' if request.endpoint == 'new_event' else '' }}">Submit Event</a>
+      {% else %}
+        <a href="{{ url_for('student_dashboard') }}" class="{{ 'active' if request.endpoint == 'student_dashboard' else '' }}">Dashboard</a>
+        <a href="{{ url_for('calendar_view') }}" class="{{ 'active' if request.endpoint in ['calendar_view','calendar_day'] else '' }}">Calendar</a>
+      {% endif %}
+      <!-- Announcements link will be added here once that module is built -->
+    </nav>
+
+    <div class="navbar-user">
+      <span class="role-badge role-{{ current_user.role }}">{{ current_user.role | capitalize }}</span>
+      <span class="user-name">{{ current_user.name }}</span>
+      <a href="{{ url_for('logout') }}" class="logout-link">Log out</a>
+    </div>
+  </div>
+</header>
+{% endif %}
+
+<main class="page-wrap">
+  {% include "_flash.html" %}
+  {% block content %}{% endblock %}
+</main>
+
+</body>
+</html>

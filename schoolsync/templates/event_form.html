@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block title %}{{ 'New Event' if mode == 'new' else 'Edit Event' }} — SchoolSync{% endblock %}
+{% block content %}
+
+<header class="page-head">
+  <h1>{{ 'Submit a New Event' if mode == 'new' else 'Edit Event' }}</h1>
+  <p class="page-sub">
+    {% if mode == 'new' and current_user.role == 'staff' %}
+      This will be submitted as <b>Pending</b> until an Admin reviews it.
+    {% elif mode == 'new' %}
+      This will be published immediately.
+    {% else %}
+      Update the details below.
+    {% endif %}
+  </p>
+</header>
+
+<section class="form-card">
+  <form method="POST" action="{{ url_for('new_event') if mode == 'new' else url_for('edit_event', event_id=event_id) }}">
+    <label for="title">Event title</label>
+    <input type="text" id="title" name="title" value="{{ form.title or '' }}" maxlength="150" placeholder="e.g. Valentine's Day Celebration" required>
+
+    <div class="form-row">
+      <div>
+        <label for="date">Date</label>
+        <input type="date" id="date" name="date" value="{{ form.date or '' }}" required>
+      </div>
+      <div></div>
+    </div>
+
+    <div class="form-row">
+      <div>
+        <label for="start_time">Start time</label>
+        <input type="time" id="start_time" name="start_time" value="{{ form.start_time or '' }}" required>
+      </div>
+      <div>
+        <label for="end_time">End time</label>
+        <input type="time" id="end_time" name="end_time" value="{{ form.end_time or '' }}" required>
+      </div>
+    </div>
+
+    <label for="location">Location</label>
+    <input type="text" id="location" name="location" value="{{ form.location or '' }}" placeholder="e.g. School Gym" required>
+
+    <label for="description">Description (optional)</label>
+    <textarea id="description" name="description" rows="4" maxlength="1000" placeholder="What's this event about?">{{ form.description or '' }}</textarea>
+
+    <button type="submit" class="btn btn-primary btn-block">
+      {{ 'Submit Event' if mode == 'new' else 'Save Changes' }}
+    </button>
+  </form>
+</section>
+
+{% endblock %}

@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}My Events — SchoolSync{% endblock %}
+{% block content %}
+
+<header class="page-head">
+  <div>
+    <h1>My Events</h1>
+    <p class="page-sub">Everything you've submitted, and its approval status.</p>
+  </div>
+  <a href="{{ url_for('new_event') }}" class="btn btn-primary">+ New Event</a>
+</header>
+
+<div class="table-wrap">
+  <table class="data-table">
+    <thead><tr><th>Title</th><th>Date</th><th>Status</th><th></th></tr></thead>
+    <tbody>
+    {% for e in events %}
+      <tr>
+        <td><a href="{{ url_for('event_detail', event_id=e.id) }}">{{ e.title }}</a></td>
+        <td>{{ e.date }} · {{ e.start_time }}–{{ e.end_time }}</td>
+        <td><span class="status-pill status-{{ e.status | lower }}">{{ e.status }}</span></td>
+        <td>
+          {% if e.status in ['Pending', 'Rejected'] %}
+            <a href="{{ url_for('edit_event', event_id=e.id) }}" class="btn btn-small">Edit</a>
+          {% endif %}
+        </td>
+      </tr>
+    {% else %}
+      <tr><td colspan="4" class="empty-state">You haven't submitted any events yet.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% endblock %}

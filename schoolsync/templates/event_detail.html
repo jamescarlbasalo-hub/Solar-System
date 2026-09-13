@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}{{ event.title }} — SchoolSync{% endblock %}
+{% block content %}
+
+<header class="page-head">
+  <div>
+    <a href="{{ url_for('calendar_day', date_str=event.date) }}" class="back-link">← Back to that day</a>
+    <h1>{{ event.title }}</h1>
+    <p class="page-sub">
+      <span class="status-pill status-{{ event.status | lower }}">{{ event.status }}</span>
+    </p>
+  </div>
+</header>
+
+<section class="event-detail-card">
+  <dl class="ticket-details">
+    <dt>Date</dt><dd>{{ event.date }}</dd>
+    <dt>Time</dt><dd>{{ event.start_time }} – {{ event.end_time }}</dd>
+    <dt>Location</dt><dd>{{ event.location }}</dd>
+    <dt>Submitted by</dt><dd>{{ creator.name if creator else 'Unknown' }}</dd>
+  </dl>
+
+  {% if event.description %}
+  <div class="event-description">{{ event.description }}</div>
+  {% endif %}
+
+  <div class="event-actions">
+    {% if can_edit_event %}
+      <a href="{{ url_for('edit_event', event_id=event.id) }}" class="btn">Edit</a>
+    {% endif %}
+
+    {% if can_approve %}
+      <form method="POST" action="{{ url_for('approve_event', event_id=event.id) }}">
+        <button type="submit" class="btn btn-good">Approve</button>
+      </form>
+    {% endif %}
+    {% if can_reject %}
+      <form method="POST" action="{{ url_for('reject_event', event_id=event.id) }}">
+        <button type="submit" class="btn btn-warn">Reject</button>
+      </form>
+    {% endif %}
+
+    {% if can_delete_event %}
+      <form method="POST" action="{{ url_for('delete_event_route', event_id=event.id) }}" onsubmit="return confirm('Delete \'{{ event.title }}\'? This can\'t be undone.');">
+        <button type="submit" class="btn btn-danger">Delete</button>
+      </form>
+    {% endif %}
+  </div>
+</section>
+
+{% endblock %}

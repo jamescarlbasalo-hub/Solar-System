@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}Staff Dashboard — SchoolSync{% endblock %}
+{% block content %}
+
+<header class="page-head">
+  <h1>Staff Dashboard</h1>
+  <p class="page-sub">Your submitted events and their approval status.</p>
+</header>
+
+<section class="stat-row">
+  <div class="stat-card stat-warn">
+    <div class="stat-value">{{ stats.pending }}</div>
+    <div class="stat-label">Pending</div>
+  </div>
+  <div class="stat-card stat-good">
+    <div class="stat-value">{{ stats.approved }}</div>
+    <div class="stat-label">Approved</div>
+  </div>
+  <div class="stat-card stat-bad">
+    <div class="stat-value">{{ stats.rejected }}</div>
+    <div class="stat-label">Rejected</div>
+  </div>
+</section>
+
+<section class="quick-links">
+  <a href="{{ url_for('calendar_view') }}" class="btn">📅 View Calendar</a>
+  <a href="{{ url_for('my_events') }}" class="btn">📋 All My Events</a>
+  <a href="{{ url_for('new_event') }}" class="btn btn-primary">+ Submit Event</a>
+</section>
+
+{% if my_events %}
+<section class="recent-section">
+  <h2>Recent submissions</h2>
+  <div class="table-wrap">
+    <table class="data-table">
+      <thead><tr><th>Title</th><th>Date</th><th>Status</th></tr></thead>
+      <tbody>
+      {% for e in my_events %}
+        <tr>
+          <td><a href="{{ url_for('event_detail', event_id=e.id) }}">{{ e.title }}</a></td>
+          <td>{{ e.date }}</td>
+          <td><span class="status-pill status-{{ e.status | lower }}">{{ e.status }}</span></td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endif %}
+
+<section class="notice-card">
+  <b>Not built yet:</b> Announcements — coming next.
+</section>
+
+{% endblock %}
