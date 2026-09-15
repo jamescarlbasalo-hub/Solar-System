@@ -1,3 +1,6 @@
+/* ===========================================================
+   SchoolSync — clean, modern, school-themed stylesheet
+   =========================================================== */
 
 :root {
   --navy: #1c3a5e;
@@ -116,11 +119,18 @@ input:focus, select:focus, textarea:focus { border-color: var(--navy); }
 
 /* ---------- auth screen ---------- */
 .auth-screen { min-height: calc(100vh - 20px); display: flex; align-items: center; justify-content: center; padding: 30px 16px; }
+
+
 .auth-card {
   background: var(--card); border: 1px solid var(--border); border-radius: 16px;
   padding: 40px 36px; width: 100%; max-width: 400px; box-shadow: 0 4px 24px rgba(28,58,94,0.08);
 }
-.auth-mark { font-size: 32px; margin-bottom: 8px; }
+
+
+.auth-logo {
+  display: block;
+  width: 110px; height: auto; margin: 0 auto 12px
+}
 .auth-card h1 { font-size: 22px; margin-bottom: 4px; }
 .auth-sub { color: var(--text-muted); font-size: 13.5px; margin-bottom: 20px; }
 .auth-form button { margin-top: 20px; }
