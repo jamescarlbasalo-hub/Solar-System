@@ -48,6 +48,20 @@
   {% include "_flash.html" %}
   {% block content %}{% endblock %}
 </main>
+<script>
+// Show/hide password. Finds every .password-toggle button on the page and
+// flips its neighbouring input between type="password" and type="text".
+document.querySelectorAll(".password-toggle").forEach(function (btn) {
+  btn.addEventListener("click", function () {
+    var input = btn.parentElement.querySelector("input");
+    var nowVisible = input.type === "password";
+    input.type = nowVisible ? "text" : "password";
+    btn.setAttribute("aria-label", nowVisible ? "Hide password" : "Show password");
+    btn.querySelector(".icon-eye").style.display = nowVisible ? "block" : "none";
+    btn.querySelector(".icon-eye-off").style.display = nowVisible ? "none" : "block";
+  });
+});
+</script>
 
 </body>
 </html>
