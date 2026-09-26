@@ -29,7 +29,7 @@ from events import (
     get_events_by_creator, get_events_by_status, get_upcoming_approved_events,
     get_todays_approved_events, count_all_events, count_events_by_status,
     update_event, set_event_status, delete_event,
-    is_visible, filter_visible, can_edit, can_delete,
+    is_visible, filter_visible, can_edit, can_delete, event_time_display,
 )
 from utils import (
     login_required, role_required, current_user, validate_signup_fields,
@@ -45,6 +45,11 @@ database.init_app(app)  # makes sure the DB connection closes after each request
 @app.context_processor
 def inject_user():
     return {"current_user": current_user()}
+
+
+# Lets any template call event_time_display(event) to print "Time to be
+# announced" for TBA events instead of a raw "TBA" string.
+app.jinja_env.globals["event_time_display"] = event_time_display
 
 
 # ---------------------------------------------------------------------------

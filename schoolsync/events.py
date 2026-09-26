@@ -135,6 +135,18 @@ def delete_event(event_id):
 
 
 # ---------------------------------------------------------------------------
+# DISPLAY HELPER
+# ---------------------------------------------------------------------------
+def event_time_display(event):
+    """Human-readable time string for templates. Staff can mark an event's
+    time as the "TBA" sentinel when it isn't decided yet — treat that as a
+    special case here instead of letting every template re-check for it."""
+    if event["start_time"] == "TBA" or event["end_time"] == "TBA":
+        return "Time to be announced"
+    return f"{event['start_time']} – {event['end_time']}"
+
+
+# ---------------------------------------------------------------------------
 # VISIBILITY + PERMISSION RULES
 # (kept here in one place so every route enforces the same rule)
 # ---------------------------------------------------------------------------

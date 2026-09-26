@@ -15,7 +15,14 @@
 <section class="event-detail-card">
   <dl class="ticket-details">
     <dt>Date</dt><dd>{{ event.date }}</dd>
-    <dt>Time</dt><dd>{{ event.start_time }} – {{ event.end_time }}</dd>
+    <dt>Time</dt>
+    <dd>
+      {% if event.start_time == 'TBA' or event.end_time == 'TBA' %}
+        <span class="tba-badge">TBA</span> {{ event_time_display(event) }}
+      {% else %}
+        {{ event_time_display(event) }}
+      {% endif %}
+    </dd>
     <dt>Location</dt><dd>{{ event.location }}</dd>
     <dt>Submitted by</dt><dd>{{ creator.name if creator else 'Unknown' }}</dd>
   </dl>

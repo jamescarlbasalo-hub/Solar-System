@@ -14,7 +14,14 @@
     {% for e in events %}
       <tr>
         <td><a href="{{ url_for('event_detail', event_id=e.id) }}">{{ e.title }}</a></td>
-        <td>{{ e.date }} · {{ e.start_time }}–{{ e.end_time }}</td>
+        <td>
+          {{ e.date }} ·
+          {% if e.start_time == 'TBA' or e.end_time == 'TBA' %}
+            <span class="tba-badge tba-badge-inline">TBA</span>
+          {% else %}
+            {{ event_time_display(e) }}
+          {% endif %}
+        </td>
         <td>{{ e.location }}</td>
         <td class="row-actions">
           <form method="POST" action="{{ url_for('approve_event', event_id=e.id) }}">

@@ -107,17 +107,24 @@ def validate_event_fields(title, date_str, start_time, end_time, location, descr
     except (ValueError, TypeError):
         errors.append("Please choose a valid date.")
 
-    start_dt = end_dt = None
-    try:
-        start_dt = datetime.strptime(start_time, "%H:%M")
-    except (ValueError, TypeError):
-        errors.append("Please choose a valid start time.")
-    try:
-        end_dt = datetime.strptime(end_time, "%H:%M")
-    except (ValueError, TypeError):
-        errors.append("Please choose a valid end time.")
-    if start_dt and end_dt and end_dt <= start_dt:
-        errors.append("End time must be after the start time.")
+    # Staff/Admin can mark the time as "TBA" when it isn't set yet — both
+    # fields come in as the "TBA" sentinel together (see event_form.html's
+    # toggle), so skip the normal time-format / start-before-end checks
+    # for that case entirely rather than rejecting "TBA" as a bad time.
+    is_tba = start_time == "TBA" and end_time == "TBA"
+
+    if not is_tba:
+        start_dt = end_dt = None
+        try:
+            start_dt = datetime.strptime(start_time, "%H:%M")
+        except (ValueError, TypeError):
+            errors.append("Please choose a valid start time.")
+        try:
+            end_dt = datetime.strptime(end_time, "%H:%M")
+        except (ValueError, TypeError):
+            errors.append("Please choose a valid end time.")
+        if start_dt and end_dt and end_dt <= start_dt:
+            errors.append("End time must be after the start time.")
 
     if not location or not location.strip():
         errors.append("Location is required.")

@@ -28,15 +28,35 @@
       <div></div>
     </div>
 
-    <div class="form-row">
+    <div class="tba-toggle-row">
+      <label class="tba-switch">
+        <input type="checkbox" id="tba_checkbox" {% if form.start_time == 'TBA' %}checked{% endif %}>
+        <span class="tba-slider"></span>
+      </label>
+      <div class="tba-toggle-text">
+        <span class="tba-toggle-title">Time not decided yet?</span>
+        <span class="tba-toggle-sub">Mark this event "To Be Announced" and add the exact time later.</span>
+      </div>
+    </div>
+
+    <div class="form-row" id="time_fields">
       <div>
         <label for="start_time">Start time</label>
-        <input type="time" id="start_time" name="start_time" value="{{ form.start_time or '' }}" required>
+        <input type="time" id="start_time" name="start_time"
+               value="{{ '' if form.start_time == 'TBA' else (form.start_time or '') }}">
       </div>
       <div>
         <label for="end_time">End time</label>
-        <input type="time" id="end_time" name="end_time" value="{{ form.end_time or '' }}" required>
+        <input type="time" id="end_time" name="end_time"
+               value="{{ '' if form.end_time == 'TBA' else (form.end_time or '') }}">
       </div>
+    </div>
+    <input type="hidden" id="start_time_tba" name="start_time" value="TBA" disabled>
+    <input type="hidden" id="end_time_tba" name="end_time" value="TBA" disabled>
+
+    <div id="tba_notice" class="notice-card tba-notice">
+      <span class="tba-badge">TBA</span>
+      <span>Time to be announced — you (or an Admin) can add the exact time later by editing this event.</span>
     </div>
 
     <label for="location">Location</label>
@@ -51,4 +71,38 @@
   </form>
 </section>
 
-{% endblock %}
+<script>
+  (function () {
+    const tbaCheckbox = document.getElementById('tba_checkbox');
+    const timeFields = document.getElementById('time_fields');
+    const tbaNotice = document.getElementById('tba_notice');
+    const startInput = document.getElementById('start_time');
+    const endInput = document.getElementById('end_time');
+    const startHidden = document.getElementById('start_time_tba');
+    const endHidden = document.getElementById('end_time_tba');
+
+    function applyState(isTBA) {
+      timeFields.classList.toggle('is-hidden', isTBA);
+      tbaNotice.classList.toggle('is-visible', isTBA);
+
+      // Disabled inputs never get submitted, so exactly one pair —
+      // the real time fields or the "TBA" hidden fields — sends its
+      // values with the form.
+      startInput.disabled = isTBA;
+      endInput.disabled = isTBA;
+      startInput.required = !isTBA;
+      endInput.required = !isTBA;
+
+      startHidden.disabled = !isTBA;
+      endHidden.disabled = !isTBA;
+    }
+
+    tbaCheckbox.addEventListener('change', function () {
+      applyState(this.checked);
+    });
+
+    applyState(tbaCheckbox.checked);
+  })();
+</script>
+
+{% endblock %}  
