@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block title %}My Events — SchoolSync{% endblock %}
+{% block content %}
+
+<header class="page-head">
+  <div>
+    <h1>My Events</h1>
+    <p class="page-sub">Everything you've submitted, and its approval status.</p>
+  </div>
+  <a href="{{ url_for('new_event') }}" class="btn btn-primary">+ New Event</a>
+</header>
+
+<div class="table-wrap">
+  <table class="data-table">
+    <thead><tr><th>Title</th><th>Date</th><th>Status</th><th></th></tr></thead>
+    <tbody>
+    {% for e in events %}
+      <tr>
+        <td><a href="{{ url_for('event_detail', event_id=e.id) }}">{{ e.title }}</a></td>
+        <td>
+          {{ e.date }} ·
+          {% if e.start_time == 'TBA' or e.end_time == 'TBA' %}
+            <span class="tba-badge tba-badge-inline">TBA</span>
+          {% else %}
+            {{ event_time_display(e) }}
+          {% endif %}
+        </td>
+        <td><span class="status-pill status-{{ e.status | lower }}">{{ e.status }}</span></td>
+        <td class="row-actions">
+          {% if e.status in ['Pending', 'Rejected'] %}
+            <a href="{{ url_for('edit_event', event_id=e.id) }}" class="btn btn-small">Edit</a>
+          {% endif %}
+          {% if e.status != 'Approved' %}
+            <form method="POST" action="{{ url_for('approve_event', event_id=e.id) }}">
+              <button type="submit" class="btn btn-small btn-good">Approve</button>
+            </form>
+          {% endif %}
+          {% if e.status != 'Rejected' %}
+            <form method="POST" action="{{ url_for('reject_event', event_id=e.id) }}">
+              <button type="submit" class="btn btn-small btn-warn">Reject</button>
+            </form>
+          {% endif %}
+          <form method="POST" action="{{ url_for('delete_event_route', event_id=e.id) }}"
+                onsubmit="return confirm('Delete \'{{ e.title }}\'? This can\'t be undone.');">
+            <button type="submit" class="btn btn-small btn-danger">Delete</button>
+          </form>
+        </td>
+      </tr>
+    {% else %}
+      <tr><td colspan="4" class="empty-state">You haven't submitted any events yet.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% endblock %}
