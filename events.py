@@ -19,11 +19,12 @@ def create_event(title, date, start_time, end_time, location, description, creat
     db = get_db()
     cursor = db.execute(
         """INSERT INTO events (title, date, start_time, end_time, location, description, created_by, status)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING id""",
         (title, date, start_time, end_time, location, description, created_by, status),
     )
+    event_id = cursor.fetchone()["id"]
     db.commit()
-    return cursor.lastrowid
+    return event_id
 
 
 # ---------------------------------------------------------------------------
@@ -38,10 +39,14 @@ def get_events_by_month(year, month):
     """All events in a given month, any status — visibility filtering
     happens separately via filter_visible(), not here."""
     db = get_db()
-    month_str = f"{year:04d}-{month:02d}"
+    month_start = date_cls(year, month, 1).isoformat()
+    if month == 12:
+        month_end = date_cls(year + 1, 1, 1).isoformat()
+    else:
+        month_end = date_cls(year, month + 1, 1).isoformat()
     rows = db.execute(
-        "SELECT * FROM events WHERE strftime('%Y-%m', date) = ? ORDER BY date, start_time",
-        (month_str,),
+        "SELECT * FROM events WHERE date >= ? AND date < ? ORDER BY date, start_time",
+        (month_start, month_end),
     ).fetchall()
     return rows
 

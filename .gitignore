@@ -1,7 +1,9 @@
 venv/
+.venv/
 __pycache__/
 *.pyc
 schoolsync.db
 .env
 
 *.db-*
+schoolsync-backup-*.db

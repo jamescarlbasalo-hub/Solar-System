@@ -100,4 +100,6 @@ Let me know when you're ready and we'll build that next.
 - Start command: `gunicorn app:app` (the existing `python seed.py && gunicorn app:app` command is also safe; demo data is skipped on Render).
 - Add `SECRET_KEY` as a long random value in Render's environment settings.
 - Set `SCHOOLSYNC_ADMIN_EMAIL` and `SCHOOLSYNC_ADMIN_PASSWORD` to create the first admin account. Optionally set `SCHOOLSYNC_ADMIN_NAME`. Existing accounts are not overwritten.
-- The app creates a missing SQLite schema on startup without deleting existing records. For persistent SQLite data, attach a Render disk mounted at `/var/data` and set `SCHOOLSYNC_DATABASE_PATH=/var/data/schoolsync.db`. Without a persistent disk or external database, Render's filesystem is temporary and database changes can be lost on restart or deploy.
+- The app uses local SQLite when `DATABASE_URL` is unset. On Render, set `DATABASE_URL` to the database's **Internal Database URL** to use Render Postgres. The app creates missing tables and additive columns without dropping records.
+- To copy local SQLite data, use `migrate_sqlite_to_postgres.py` with the **External Database URL**. Run it before connecting the web service to Postgres; it refuses to import into a non-empty destination and opens the SQLite source read-only.
+- Free Render Postgres is intended for testing and expires after 30 days. Choose a plan that meets your data-retention needs before relying on it for production.

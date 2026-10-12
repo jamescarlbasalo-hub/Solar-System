@@ -1,7 +1,7 @@
-import sqlite3
 from datetime import datetime, timezone
 
 from werkzeug.security import generate_password_hash, check_password_hash
+import database
 from database import get_db
 
 VALID_ROLES = ("admin", "staff", "student")
@@ -20,12 +20,13 @@ def create_user(name, email, password, role):
     password_hash = generate_password_hash(password)
     try:
         cursor = db.execute(
-            "INSERT INTO users (name, email, password_hash, role) VALUES (?, ?, ?, ?)",
+            "INSERT INTO users (name, email, password_hash, role) VALUES (?, ?, ?, ?) RETURNING id",
             (name, email, password_hash, role),
         )
+        user_id = cursor.fetchone()["id"]
         db.commit()
-        return cursor.lastrowid
-    except db.IntegrityError:
+        return user_id
+    except database.INTEGRITY_ERRORS:
         # This fires if the UNIQUE constraint on `email` is violated.
         return None
 
@@ -79,7 +80,7 @@ def update_user_account(user_id, name, email, role):
         )
         db.commit()
         return True
-    except db.IntegrityError:
+    except database.INTEGRITY_ERRORS:
         return False
 
 
@@ -104,7 +105,7 @@ def update_own_profile(user_id, name, email):
         )
         db.commit()
         return True
-    except db.IntegrityError:
+    except database.INTEGRITY_ERRORS:
         return False
 
 
@@ -142,7 +143,7 @@ def admin_reset_password(admin_id, target_id, new_password):
     account's password can't be changed by this function.
 
     Returns True on success, False if no such resettable account exists.
-    Raises sqlite3.Error on a database failure (after rolling back)."""
+    Raises a database driver error on failure (after rolling back)."""
     db = get_db()
     password_hash = generate_password_hash(new_password)
     now = datetime.now(timezone.utc).isoformat(timespec="seconds")
@@ -165,7 +166,7 @@ def admin_reset_password(admin_id, target_id, new_password):
         )
         db.commit()
         return True
-    except sqlite3.Error:
+    except database.DATABASE_ERRORS:
         db.rollback()
         raise
 

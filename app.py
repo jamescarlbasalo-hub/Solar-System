@@ -15,7 +15,6 @@ Then open http://127.0.0.1:5000
 """
 
 import os
-import sqlite3
 import calendar as cal
 from datetime import date as date_cls, datetime, timedelta
 
@@ -103,7 +102,7 @@ def recover_admin_from_environment():
         db = database.get_db()
         try:
             # Serialize startup workers so this token can only be consumed once.
-            db.execute("BEGIN IMMEDIATE")
+            database.begin_serialized(db, lock_id=734129)
             already_used = db.execute(
                 "SELECT 1 FROM admin_password_recoveries WHERE token_hash = ?",
                 (token_hash,),
@@ -122,9 +121,7 @@ def recover_admin_from_environment():
                 print("Admin recovery skipped: no admin account matches the recovery email.")
                 return
 
-            user_columns = {
-                row["name"] for row in db.execute("PRAGMA table_info(users)").fetchall()
-            }
+            user_columns = database.table_columns(db, "users")
             assignments = ["password_hash = ?"]
             values = [generate_password_hash(password)]
             if "session_version" in user_columns:
@@ -695,7 +692,7 @@ def reset_account_password(user_id):
 
     try:
         reset_done = admin_reset_password(admin["id"], target["id"], temp_password)
-    except sqlite3.Error:
+    except database.DATABASE_ERRORS:
         # Deliberately generic, and the password is never logged.
         app.logger.error("Password reset failed (database error) for user id %s", target["id"])
         flash("Something went wrong and the password was not reset. Please try again.", "error")

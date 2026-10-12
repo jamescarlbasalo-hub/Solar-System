@@ -1,25 +1,106 @@
+"""Database access for SchoolSync.
+
+Local development uses SQLite by default. Set DATABASE_URL to a PostgreSQL
+connection URL (Render's Internal URL in the web service) to use PostgreSQL.
+The small connection adapter keeps the app's existing qmark SQL portable.
+"""
+
 import os
 import sqlite3
+
+import psycopg
+from psycopg.rows import dict_row
 from flask import g
 
 DEFAULT_DATABASE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "schoolsync.db")
 DATABASE_PATH = os.environ.get("SCHOOLSYNC_DATABASE_PATH", DEFAULT_DATABASE_PATH)
 SCHEMA_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "schema.sql")
+DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
+POSTGRES = bool(DATABASE_URL)
+
+DATABASE_ERRORS = (sqlite3.Error, psycopg.Error)
+INTEGRITY_ERRORS = (sqlite3.IntegrityError, psycopg.IntegrityError)
+
+
+def _translate_qmark_placeholders(sql):
+    """Translate SQLite-style ? parameters while leaving quoted text intact."""
+    output = []
+    quote = None
+    index = 0
+    while index < len(sql):
+        char = sql[index]
+        if quote:
+            output.append(char)
+            if char == quote:
+                if index + 1 < len(sql) and sql[index + 1] == quote:
+                    output.append(sql[index + 1])
+                    index += 1
+                else:
+                    quote = None
+        elif char in ("'", '"'):
+            quote = char
+            output.append(char)
+        elif char == "?":
+            output.append("%s")
+        else:
+            output.append(char)
+        index += 1
+    return "".join(output)
+
+
+class DatabaseConnection:
+    """Expose a consistent execute/commit API for SQLite and psycopg."""
+
+    def __init__(self, raw, is_postgres):
+        self.raw = raw
+        self.is_postgres = is_postgres
+
+    @property
+    def IntegrityError(self):
+        return psycopg.IntegrityError if self.is_postgres else sqlite3.IntegrityError
+
+    @property
+    def Error(self):
+        return psycopg.Error if self.is_postgres else sqlite3.Error
+
+    def execute(self, sql, params=()):
+        if self.is_postgres:
+            sql = _translate_qmark_placeholders(sql)
+        return self.raw.execute(sql, params)
+
+    def executemany(self, sql, params):
+        if self.is_postgres:
+            sql = _translate_qmark_placeholders(sql)
+            # psycopg 3 exposes executemany on cursors, not connections.
+            cursor = self.raw.cursor()
+            cursor.executemany(sql, params)
+            return cursor
+        return self.raw.executemany(sql, params)
+
+    def __getattr__(self, name):
+        return getattr(self.raw, name)
 
 
 def _connect():
-    """Open a configured SQLite connection and create its parent directory."""
+    """Open a connection to DATABASE_URL, or local SQLite when unset."""
+    if DATABASE_URL:
+        url = DATABASE_URL
+        if url.startswith("postgres://"):
+            url = "postgresql://" + url[len("postgres://"):]
+        raw = psycopg.connect(url, row_factory=dict_row, connect_timeout=15)
+        return DatabaseConnection(raw, True)
+
     parent = os.path.dirname(os.path.abspath(DATABASE_PATH))
     os.makedirs(parent, exist_ok=True)
-    conn = sqlite3.connect(DATABASE_PATH, timeout=30)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys = ON")
-    conn.execute("PRAGMA busy_timeout = 30000")
-    return conn
+    raw = sqlite3.connect(DATABASE_PATH, timeout=30)
+    raw.row_factory = sqlite3.Row
+    raw.execute("PRAGMA foreign_keys = ON")
+    raw.execute("PRAGMA busy_timeout = 30000")
+    return DatabaseConnection(raw, False)
 
 
 def get_db():
-    """Return this request's SQLite connection, creating it on first use."""
+    """Return this request's connection, opening it on first use."""
     if "db" not in g:
         g.db = _connect()
     return g.db
@@ -32,9 +113,33 @@ def close_db(e=None):
         db.close()
 
 
+def begin_serialized(db, lock_id=734128):
+    """Start a transaction serialized against other startup/recovery workers."""
+    if db.is_postgres:
+        db.execute("SELECT pg_advisory_xact_lock(?)", (lock_id,))
+    else:
+        db.execute("BEGIN IMMEDIATE")
+
+
+def table_columns(conn, table):
+    """Return a table's column names on either supported database."""
+    if conn.is_postgres:
+        rows = conn.execute(
+            """SELECT column_name AS name FROM information_schema.columns
+               WHERE table_schema = current_schema() AND table_name = ?""",
+            (table,),
+        ).fetchall()
+    else:
+        rows = conn.execute(f"PRAGMA table_info({table})").fetchall()
+    return {row["name"] for row in rows}
+
+
 def init_db():
-    """Destructively recreate tables from schema.sql for explicit local resets only."""
+    """Reset only a local SQLite database; safely initialize PostgreSQL."""
     db = get_db()
+    if db.is_postgres:
+        ensure_schema_migrations()
+        return
     with open(SCHEMA_PATH, "r", encoding="utf-8") as schema_file:
         db.executescript(schema_file.read())
     db.commit()
@@ -45,8 +150,8 @@ def init_app(app):
     app.teardown_appcontext(close_db)
 
 
-def _ensure_base_schema(conn):
-    """Create base tables without dropping or overwriting existing data."""
+def _ensure_sqlite_schema(conn):
+    """Create SQLite base tables without dropping or overwriting data."""
     conn.execute(
         """CREATE TABLE IF NOT EXISTS users (
                id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -84,80 +189,147 @@ def _ensure_base_schema(conn):
            )"""
     )
 
-def ensure_schema_migrations():
-    """Safely create the schema and apply additive migrations on every startup.
 
-    The transaction serializes concurrent Gunicorn workers so that only the
-    first worker applies a missing-column migration. No existing rows are
-    dropped or replaced.
-    """
+def _ensure_postgres_schema(conn):
+    """Create the complete PostgreSQL schema idempotently; never drop data."""
+    statements = [
+        """CREATE TABLE IF NOT EXISTS users (
+               id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+               name TEXT NOT NULL,
+               email TEXT NOT NULL UNIQUE,
+               password_hash TEXT NOT NULL,
+               role TEXT NOT NULL CHECK (role IN ('admin', 'staff', 'student')),
+               created_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP::text),
+               is_active INTEGER NOT NULL DEFAULT 1,
+               last_profile_update TEXT,
+               must_change_password INTEGER NOT NULL DEFAULT 0,
+               session_version INTEGER NOT NULL DEFAULT 0
+           )""",
+        """CREATE TABLE IF NOT EXISTS events (
+               id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+               title TEXT NOT NULL,
+               date TEXT NOT NULL,
+               start_time TEXT NOT NULL,
+               end_time TEXT NOT NULL,
+               location TEXT NOT NULL,
+               description TEXT,
+               created_by BIGINT NOT NULL REFERENCES users (id),
+               status TEXT NOT NULL DEFAULT 'Pending'
+                   CHECK (status IN ('Pending', 'Approved', 'Rejected')),
+               created_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP::text)
+           )""",
+        """CREATE TABLE IF NOT EXISTS announcements (
+               id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+               title TEXT NOT NULL,
+               content TEXT NOT NULL,
+               posted_by BIGINT NOT NULL REFERENCES users (id),
+               created_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP::text)
+           )""",
+        """CREATE TABLE IF NOT EXISTS audit_log (
+               id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+               admin_id BIGINT,
+               target_user_id BIGINT,
+               action TEXT NOT NULL,
+               status TEXT NOT NULL,
+               created_at TEXT NOT NULL
+           )""",
+        """CREATE TABLE IF NOT EXISTS password_resets (
+               id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+               user_id BIGINT NOT NULL REFERENCES users (id),
+               token_hash TEXT NOT NULL UNIQUE,
+               expires_at TEXT NOT NULL,
+               used_at TEXT,
+               created_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP::text),
+               created_by_admin_id BIGINT NOT NULL REFERENCES users (id)
+           )""",
+        """CREATE TABLE IF NOT EXISTS audit_logs (
+               id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+               actor_id BIGINT NOT NULL REFERENCES users (id),
+               target_id BIGINT NOT NULL REFERENCES users (id),
+               action TEXT NOT NULL,
+               status TEXT NOT NULL,
+               created_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP::text)
+           )""",
+        """CREATE TABLE IF NOT EXISTS admin_password_recoveries (
+               token_hash TEXT PRIMARY KEY,
+               admin_email TEXT NOT NULL,
+               used_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP::text)
+           )""",
+    ]
+    for statement in statements:
+        conn.execute(statement)
+    conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_active INTEGER NOT NULL DEFAULT 1")
+    conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS last_profile_update TEXT")
+    conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS must_change_password INTEGER NOT NULL DEFAULT 0")
+    conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS session_version INTEGER NOT NULL DEFAULT 0")
+
+
+def _ensure_sqlite_support_tables(conn):
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS audit_log (
+               id INTEGER PRIMARY KEY AUTOINCREMENT,
+               admin_id INTEGER,
+               target_user_id INTEGER,
+               action TEXT NOT NULL,
+               status TEXT NOT NULL,
+               created_at TEXT NOT NULL
+           )"""
+    )
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS password_resets (
+               id INTEGER PRIMARY KEY AUTOINCREMENT,
+               user_id INTEGER NOT NULL,
+               token_hash TEXT NOT NULL UNIQUE,
+               expires_at TEXT NOT NULL,
+               used_at TEXT,
+               created_at TEXT NOT NULL DEFAULT (datetime('now')),
+               created_by_admin_id INTEGER NOT NULL,
+               FOREIGN KEY (user_id) REFERENCES users (id),
+               FOREIGN KEY (created_by_admin_id) REFERENCES users (id)
+           )"""
+    )
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS audit_logs (
+               id INTEGER PRIMARY KEY AUTOINCREMENT,
+               actor_id INTEGER NOT NULL,
+               target_id INTEGER NOT NULL,
+               action TEXT NOT NULL,
+               status TEXT NOT NULL,
+               created_at TEXT NOT NULL DEFAULT (datetime('now')),
+               FOREIGN KEY (actor_id) REFERENCES users (id),
+               FOREIGN KEY (target_id) REFERENCES users (id)
+           )"""
+    )
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS admin_password_recoveries (
+               token_hash TEXT PRIMARY KEY,
+               admin_email TEXT NOT NULL,
+               used_at TEXT NOT NULL DEFAULT (datetime('now'))
+           )"""
+    )
+
+
+def ensure_schema_migrations():
+    """Safely create tables and apply additive migrations at startup."""
     conn = _connect()
     try:
-        conn.execute("BEGIN IMMEDIATE")
-        _ensure_base_schema(conn)
-
-        columns = {
-            row["name"]
-            for row in conn.execute("PRAGMA table_info(users)").fetchall()
-        }
-        migrations = {
-            "is_active": "INTEGER NOT NULL DEFAULT 1",
-            "last_profile_update": "TEXT",
-            "must_change_password": "INTEGER NOT NULL DEFAULT 0",
-            "session_version": "INTEGER NOT NULL DEFAULT 0",
-        }
-        for column, definition in migrations.items():
-            if column not in columns:
-                conn.execute(f"ALTER TABLE users ADD COLUMN {column} {definition}")
-
-        # Used by the account-settings password-reset flow.
-        conn.execute(
-            """CREATE TABLE IF NOT EXISTS audit_log (
-                   id INTEGER PRIMARY KEY AUTOINCREMENT,
-                   admin_id INTEGER,
-                   target_user_id INTEGER,
-                   action TEXT NOT NULL,
-                   status TEXT NOT NULL,
-                   created_at TEXT NOT NULL
-               )"""
-        )
-
-        # Used by the one-time reset-token flow. Keep these tables available
-        # even when the app is started directly with Gunicorn (without seed.py).
-        conn.execute(
-            """CREATE TABLE IF NOT EXISTS password_resets (
-                   id INTEGER PRIMARY KEY AUTOINCREMENT,
-                   user_id INTEGER NOT NULL,
-                   token_hash TEXT NOT NULL UNIQUE,
-                   expires_at TEXT NOT NULL,
-                   used_at TEXT,
-                   created_at TEXT NOT NULL DEFAULT (datetime('now')),
-                   created_by_admin_id INTEGER NOT NULL,
-                   FOREIGN KEY (user_id) REFERENCES users (id),
-                   FOREIGN KEY (created_by_admin_id) REFERENCES users (id)
-               )"""
-        )
-        conn.execute(
-            """CREATE TABLE IF NOT EXISTS audit_logs (
-                   id INTEGER PRIMARY KEY AUTOINCREMENT,
-                   actor_id INTEGER NOT NULL,
-                   target_id INTEGER NOT NULL,
-                   action TEXT NOT NULL,
-                   status TEXT NOT NULL,
-                   created_at TEXT NOT NULL DEFAULT (datetime('now')),
-                   FOREIGN KEY (actor_id) REFERENCES users (id),
-                   FOREIGN KEY (target_id) REFERENCES users (id)
-               )"""
-        )
-        # A one-time recovery token prevents an admin recovery environment
-        # variable from resetting the password again on every worker restart.
-        conn.execute(
-            """CREATE TABLE IF NOT EXISTS admin_password_recoveries (
-                   token_hash TEXT PRIMARY KEY,
-                   admin_email TEXT NOT NULL,
-                   used_at TEXT NOT NULL DEFAULT (datetime('now'))
-               )"""
-        )
+        if conn.is_postgres:
+            begin_serialized(conn)
+            _ensure_postgres_schema(conn)
+        else:
+            begin_serialized(conn)
+            _ensure_sqlite_schema(conn)
+            columns = table_columns(conn, "users")
+            migrations = {
+                "is_active": "INTEGER NOT NULL DEFAULT 1",
+                "last_profile_update": "TEXT",
+                "must_change_password": "INTEGER NOT NULL DEFAULT 0",
+                "session_version": "INTEGER NOT NULL DEFAULT 0",
+            }
+            for column, definition in migrations.items():
+                if column not in columns:
+                    conn.execute(f"ALTER TABLE users ADD COLUMN {column} {definition}")
+            _ensure_sqlite_support_tables(conn)
         conn.commit()
     except Exception:
         conn.rollback()
