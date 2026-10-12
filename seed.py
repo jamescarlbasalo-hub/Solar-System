@@ -1,87 +1,63 @@
+"""Initialize SchoolSync safely and add development-only demo content.
+
+This script is safe to run more than once. It never drops or clears tables.
+On Render, it skips predictable demo accounts and sample events; the optional
+SCHOOLSYNC_ADMIN_* environment variables bootstrap the first administrator.
+"""
+import os
 from datetime import date, timedelta
+
 from app import app
 import database
 from models import create_user, get_user_by_email
 from events import create_event
 
-with app.app_context():
-    database.init_db()
-    print("Database schema created.")
 
-    demo_accounts = [
-        ("School Administrator", "admin@schoolsync.edu", "admin123", "admin"),
-        ("Mr. Santos (Staff)", "staff@schoolsync.edu", "staff123", "staff"),
-        ("Liza Fernandez (Student)", "student@schoolsync.edu", "student123", "student"),
-    ]
-
-    for name, email, password, role in demo_accounts:
-        user_id = create_user(name, email, password, role)
-        if user_id:
-            print(f"  Created {role}: {email}")
-        else:
-            print(f"  Skipped {email} (already exists)")
-
-    admin = get_user_by_email("admin@schoolsync.edu")
-    staff = get_user_by_email("staff@schoolsync.edu")
-    today = date.today()
-
-    # A past event
-    past_date = (today - timedelta(days=14)).isoformat()
-    create_event(
-        "First Day of School Assembly", past_date, "07:30", "09:00",
-        "School Gym", "Welcome assembly for the new school year.",
-        admin["id"], "Approved",
-    )
-
-    # Future Approved events
-    future_examples = [
-        (30, "09:00", "15:00", "School Gym", "Valentine's-style celebration for students and staff."),
-        (60, "08:00", "17:00", "School Grounds", "Annual school intramurals — all classes participate."),
-        (90, "08:00", "12:00", "Main Hall", "School Foundation Day program and recognition rites."),
-    ]
-    titles = ["Valentine's Day Celebration", "School Intramurals", "School Foundation Day"]
-    for (days_ahead, start, end, location, desc), title in zip(future_examples, titles):
-        event_date = (today + timedelta(days=days_ahead)).isoformat()
-        create_event(title, event_date, start, end, location, desc, admin["id"], "Approved")
-
-    # A Staff-submitted event still waiting for review
-    pending_date = (today + timedelta(days=10)).isoformat()
-    create_event(
-        "Student Council Meeting", pending_date, "13:00", "14:00",
-        "Room 204", "Monthly student council meeting — open to all officers.",
-        staff["id"], "Pending",
-    )
-
-    print("Sample events created.")
-
-    # -------------------------------------------------------------------------
-    # AUTOMATIC DATABASE TABLE SETUP
-    # -------------------------------------------------------------------------
+def create_event_once(title, date_value, start_time, end_time, location, description, creator_id, status):
     db = database.get_db()
-    db.execute("""
-    CREATE TABLE IF NOT EXISTS password_resets (
-        id                  INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id             INTEGER NOT NULL,
-        token_hash          TEXT NOT NULL UNIQUE,
-        expires_at          TEXT NOT NULL,
-        used_at             TEXT,
-        created_at          TEXT NOT NULL DEFAULT (datetime('now')),
-        created_by_admin_id INTEGER NOT NULL,
-        FOREIGN KEY (user_id) REFERENCES users (id),
-        FOREIGN KEY (created_by_admin_id) REFERENCES users (id)
-    );
-    """)
-    db.execute("""
-    CREATE TABLE IF NOT EXISTS audit_logs (
-        id          INTEGER PRIMARY KEY AUTOINCREMENT,
-        actor_id    INTEGER NOT NULL,
-        target_id   INTEGER NOT NULL,
-        action      TEXT NOT NULL,
-        status      TEXT NOT NULL,
-        created_at  TEXT NOT NULL DEFAULT (datetime('now')),
-        FOREIGN KEY (actor_id) REFERENCES users (id),
-        FOREIGN KEY (target_id) REFERENCES users (id)
-    );
-    """)
-    db.commit()
-    print("Successfully initialized password_resets and audit_logs tables!")
+    existing = db.execute(
+        "SELECT 1 FROM events WHERE title = ? AND created_by = ? LIMIT 1",
+        (title, creator_id),
+    ).fetchone()
+    if existing:
+        return False
+    create_event(title, date_value, start_time, end_time, location, description, creator_id, status)
+    return True
+
+
+with app.app_context():
+    database.ensure_schema_migrations()
+    print("Database schema is ready.")
+
+    if os.environ.get("RENDER"):
+        print("Render detected; skipping development demo accounts and events.")
+        if not os.environ.get("SCHOOLSYNC_ADMIN_EMAIL") or not os.environ.get("SCHOOLSYNC_ADMIN_PASSWORD"):
+            print("Set SCHOOLSYNC_ADMIN_EMAIL and SCHOOLSYNC_ADMIN_PASSWORD in Render to create the first admin account.")
+    else:
+        demo_accounts = [
+            ("School Administrator", "admin@schoolsync.edu", "admin123", "admin"),
+            ("Mr. Santos (Staff)", "staff@schoolsync.edu", "staff123", "staff"),
+            ("Liza Fernandez (Student)", "student@schoolsync.edu", "student123", "student"),
+        ]
+
+        for name, email, password, role in demo_accounts:
+            if get_user_by_email(email) is None:
+                create_user(name, email, password, role)
+                print(f"Created demo {role} account: {email}")
+
+        admin = get_user_by_email("admin@schoolsync.edu")
+        staff = get_user_by_email("staff@schoolsync.edu")
+        today = date.today()
+
+        if admin and staff:
+            samples = [
+                ("First Day of School Assembly", (today - timedelta(days=14)).isoformat(), "07:30", "09:00", "School Gym", "Welcome assembly for the new school year.", admin["id"], "Approved"),
+                ("Valentine's Day Celebration", (today + timedelta(days=30)).isoformat(), "09:00", "15:00", "School Gym", "A celebration for students and staff.", admin["id"], "Approved"),
+                ("School Intramurals", (today + timedelta(days=60)).isoformat(), "08:00", "17:00", "School Grounds", "Annual school intramurals.", admin["id"], "Approved"),
+                ("School Foundation Day", (today + timedelta(days=90)).isoformat(), "08:00", "12:00", "Main Hall", "School Foundation Day program.", admin["id"], "Approved"),
+                ("Student Council Meeting", (today + timedelta(days=10)).isoformat(), "13:00", "14:00", "Room 204", "Monthly student council meeting.", staff["id"], "Pending"),
+            ]
+            for title, date_value, start, end, location, description, creator_id, status in samples:
+                create_event_once(title, date_value, start, end, location, description, creator_id, status)
+
+        print("Development demo data is ready (existing accounts and events were preserved).")

@@ -58,9 +58,24 @@ app.config["MAX_CONTENT_LENGTH"] = 1 * 1024 * 1024
 # Browsers won't attach the login cookie to a form posted from another
 # website. A second layer on top of the CSRF tokens below.
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+app.config["SESSION_COOKIE_SECURE"] = bool(os.environ.get("RENDER"))
 
 database.init_app(app)  # makes sure the DB connection closes after each request
-database.ensure_schema_migrations()  # adds users.is_active if it isn't there yet
+database.ensure_schema_migrations()  # creates fresh tables and applies safe migrations
+def bootstrap_admin_from_environment():
+    """Create the first production admin from Render environment settings."""
+    email = os.environ.get("SCHOOLSYNC_ADMIN_EMAIL", "").strip().lower()
+    password = os.environ.get("SCHOOLSYNC_ADMIN_PASSWORD", "")
+    if not email or not password:
+        return
+
+    with app.app_context():
+        if get_user_by_email(email) is None:
+            name = os.environ.get("SCHOOLSYNC_ADMIN_NAME", "School Administrator").strip()
+            create_user(name or "School Administrator", email, password, "admin")
+
+
+bootstrap_admin_from_environment()
 
 # Limits how many requests one IP address can make in a given window.
 # default_limits applies everywhere unless a route sets its own tighter

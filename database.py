@@ -1,103 +1,157 @@
-import sqlite3
 import os
+import sqlite3
 from flask import g
 
-DATABASE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "schoolsync.db")
+DEFAULT_DATABASE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "schoolsync.db")
+DATABASE_PATH = os.environ.get("SCHOOLSYNC_DATABASE_PATH", DEFAULT_DATABASE_PATH)
 SCHEMA_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "schema.sql")
 
 
-def get_db():
-    """
-    Returns a connection to the database for the current request.
+def _connect():
+    """Open a configured SQLite connection and create its parent directory."""
+    parent = os.path.dirname(os.path.abspath(DATABASE_PATH))
+    os.makedirs(parent, exist_ok=True)
+    conn = sqlite3.connect(DATABASE_PATH, timeout=30)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON")
+    conn.execute("PRAGMA busy_timeout = 30000")
+    return conn
 
-    Flask's `g` object is a little storage box that lives for exactly
-    one request. The first time a route calls get_db(), we open a real
-    connection and stash it in `g`. If the same route calls get_db()
-    again later, we hand back the *same* connection instead of opening
-    a second one.
-    """
+
+def get_db():
+    """Return this request's SQLite connection, creating it on first use."""
     if "db" not in g:
-        g.db = sqlite3.connect(DATABASE_PATH)
-        # row_factory makes query results behave like dictionaries
-        # (row["name"] instead of row[1]) which is much easier to read.
-        g.db.row_factory = sqlite3.Row
-        # Without this line, SQLite ignores FOREIGN KEY rules by default.
-        g.db.execute("PRAGMA foreign_keys = ON")
+        g.db = _connect()
     return g.db
 
 
 def close_db(e=None):
-    """Closes the database connection at the end of the request.
-    Registered with app.teardown_appcontext() in app.py."""
+    """Close the current request's database connection."""
     db = g.pop("db", None)
     if db is not None:
         db.close()
 
 
 def init_db():
-    """
-    Wipes and (re)creates all tables from schema.sql.
-    Run this once via seed.py — NOT on every app startup, or you'd
-    lose your data every time you restart the server.
-    """
+    """Destructively recreate tables from schema.sql for explicit local resets only."""
     db = get_db()
-    with open(SCHEMA_PATH, "r") as f:
-        db.executescript(f.read())
+    with open(SCHEMA_PATH, "r", encoding="utf-8") as schema_file:
+        db.executescript(schema_file.read())
     db.commit()
 
 
 def init_app(app):
-    """Called once from app.py so Flask knows to clean up the database
-    connection automatically after every request."""
+    """Register request-scoped connection cleanup with Flask."""
     app.teardown_appcontext(close_db)
 
 
-def ensure_schema_migrations():
-    """One-time, additive schema fixes, safe to run every time the app
-    starts up. Unlike init_db() (which wipes and recreates everything —
-    only meant for first-time setup), this checks what's already there
-    and only adds what's missing, so it never touches existing data.
-
-    Columns added to `users`, each only if missing:
-    - `is_active` for the account deactivate/reactivate feature — every
-      existing account defaults to active (1) automatically.
-    - `last_profile_update` for the self-service "edit your own name/
-      email/password" page's 30-day cooldown — NULL by default, meaning
-      "never self-edited yet", so everyone starts off eligible.
-    - `must_change_password` — set to 1 when an Admin resets someone's
-      password, forcing them to pick a new one at their next login.
-      Everyone starts at 0, so no existing account is affected.
-    - `session_version` — bumped each time an Admin resets a password so
-      that any session the affected user already had open stops working.
-      Everyone starts at 0, which matches sessions that already exist,
-      so nobody gets logged out just because of this upgrade.
-
-    Table created only if missing:
-    - `audit_log` — one row per admin password reset (who, whom, when,
-      what, outcome). It never stores any password or hash."""
-    conn = sqlite3.connect(DATABASE_PATH)
-    conn.row_factory = sqlite3.Row
-    columns = [row["name"] for row in conn.execute("PRAGMA table_info(users)").fetchall()]
-    if "is_active" not in columns:
-        conn.execute("ALTER TABLE users ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1")
-    if "last_profile_update" not in columns:
-        conn.execute("ALTER TABLE users ADD COLUMN last_profile_update TEXT")
-    if "must_change_password" not in columns:
-        conn.execute("ALTER TABLE users ADD COLUMN must_change_password INTEGER NOT NULL DEFAULT 0")
-    if "session_version" not in columns:
-        conn.execute("ALTER TABLE users ADD COLUMN session_version INTEGER NOT NULL DEFAULT 0")
-
-    # No FOREIGN KEY on purpose: the history should survive even if the
-    # admin or the affected account is deleted later.
+def _ensure_base_schema(conn):
+    """Create base tables without dropping or overwriting existing data."""
     conn.execute(
-        """CREATE TABLE IF NOT EXISTS audit_log (
+        """CREATE TABLE IF NOT EXISTS users (
                id INTEGER PRIMARY KEY AUTOINCREMENT,
-               admin_id INTEGER,
-               target_user_id INTEGER,
-               action TEXT NOT NULL,
-               status TEXT NOT NULL,
-               created_at TEXT NOT NULL
+               name TEXT NOT NULL,
+               email TEXT NOT NULL UNIQUE,
+               password_hash TEXT NOT NULL,
+               role TEXT NOT NULL CHECK (role IN ('admin', 'staff', 'student')),
+               created_at TEXT NOT NULL DEFAULT (datetime('now'))
            )"""
     )
-    conn.commit()
-    conn.close()
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS events (
+               id INTEGER PRIMARY KEY AUTOINCREMENT,
+               title TEXT NOT NULL,
+               date TEXT NOT NULL,
+               start_time TEXT NOT NULL,
+               end_time TEXT NOT NULL,
+               location TEXT NOT NULL,
+               description TEXT,
+               created_by INTEGER NOT NULL,
+               status TEXT NOT NULL DEFAULT 'Pending'
+                   CHECK (status IN ('Pending', 'Approved', 'Rejected')),
+               created_at TEXT NOT NULL DEFAULT (datetime('now')),
+               FOREIGN KEY (created_by) REFERENCES users (id)
+           )"""
+    )
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS announcements (
+               id INTEGER PRIMARY KEY AUTOINCREMENT,
+               title TEXT NOT NULL,
+               content TEXT NOT NULL,
+               posted_by INTEGER NOT NULL,
+               created_at TEXT NOT NULL DEFAULT (datetime('now')),
+               FOREIGN KEY (posted_by) REFERENCES users (id)
+           )"""
+    )
+
+def ensure_schema_migrations():
+    """Safely create the schema and apply additive migrations on every startup.
+
+    The transaction serializes concurrent Gunicorn workers so that only the
+    first worker applies a missing-column migration. No existing rows are
+    dropped or replaced.
+    """
+    conn = _connect()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        _ensure_base_schema(conn)
+
+        columns = {
+            row["name"]
+            for row in conn.execute("PRAGMA table_info(users)").fetchall()
+        }
+        migrations = {
+            "is_active": "INTEGER NOT NULL DEFAULT 1",
+            "last_profile_update": "TEXT",
+            "must_change_password": "INTEGER NOT NULL DEFAULT 0",
+            "session_version": "INTEGER NOT NULL DEFAULT 0",
+        }
+        for column, definition in migrations.items():
+            if column not in columns:
+                conn.execute(f"ALTER TABLE users ADD COLUMN {column} {definition}")
+
+        # Used by the account-settings password-reset flow.
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS audit_log (
+                   id INTEGER PRIMARY KEY AUTOINCREMENT,
+                   admin_id INTEGER,
+                   target_user_id INTEGER,
+                   action TEXT NOT NULL,
+                   status TEXT NOT NULL,
+                   created_at TEXT NOT NULL
+               )"""
+        )
+
+        # Used by the one-time reset-token flow. Keep these tables available
+        # even when the app is started directly with Gunicorn (without seed.py).
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS password_resets (
+                   id INTEGER PRIMARY KEY AUTOINCREMENT,
+                   user_id INTEGER NOT NULL,
+                   token_hash TEXT NOT NULL UNIQUE,
+                   expires_at TEXT NOT NULL,
+                   used_at TEXT,
+                   created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                   created_by_admin_id INTEGER NOT NULL,
+                   FOREIGN KEY (user_id) REFERENCES users (id),
+                   FOREIGN KEY (created_by_admin_id) REFERENCES users (id)
+               )"""
+        )
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS audit_logs (
+                   id INTEGER PRIMARY KEY AUTOINCREMENT,
+                   actor_id INTEGER NOT NULL,
+                   target_id INTEGER NOT NULL,
+                   action TEXT NOT NULL,
+                   status TEXT NOT NULL,
+                   created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                   FOREIGN KEY (actor_id) REFERENCES users (id),
+                   FOREIGN KEY (target_id) REFERENCES users (id)
+               )"""
+        )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
