@@ -823,6 +823,37 @@ input:-webkit-autofill,input:-webkit-autofill:hover,input:-webkit-autofill:focus
   .auth-form .password-field .password-toggle { right:6px; width:40px; height:40px; }
 }
 
+/* Keep account actions available in the compact mobile navigation. */
+@media (max-width:720px) {
+  .sidebar-bottom {
+    display:grid;
+    grid-template-columns:repeat(2,minmax(0,1fr));
+    gap:8px;
+    margin-top:10px;
+    padding-top:10px;
+    border-top:1px solid rgba(255,255,255,.07);
+  }
+  .sidebar-utility {
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    gap:7px;
+    min-width:0;
+    min-height:40px;
+    padding:0 10px;
+    border:1px solid rgba(255,255,255,.07);
+    border-radius:11px;
+    background:rgba(255,255,255,.035);
+    color:#c4bdce;
+    font-size:11px;
+    text-decoration:none;
+    white-space:nowrap;
+  }
+  .sidebar-utility .nav-icon { display:inline-grid; width:auto; font-size:14px; }
+  .sidebar-utility:hover { border-color:rgba(184,124,255,.24); background:rgba(157,114,255,.1); }
+  .sidebar-utility:focus-visible { outline:2px solid #a77aff; outline-offset:2px; }
+}
+
 /* Dark reset-password surfaces: keep text readable in the modal and result page. */
 .reset-options .reset-option {
   color: #f5f1fa;
