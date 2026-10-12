@@ -24,6 +24,7 @@ from flask import (
 )
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
+from werkzeug.security import generate_password_hash
 
 import database
 from models import (
@@ -62,6 +63,8 @@ app.config["SESSION_COOKIE_SECURE"] = bool(os.environ.get("RENDER"))
 
 database.init_app(app)  # makes sure the DB connection closes after each request
 database.ensure_schema_migrations()  # creates fresh tables and applies safe migrations
+
+
 def bootstrap_admin_from_environment():
     """Create the first production admin from Render environment settings."""
     email = os.environ.get("SCHOOLSYNC_ADMIN_EMAIL", "").strip().lower()
@@ -76,6 +79,82 @@ def bootstrap_admin_from_environment():
 
 
 bootstrap_admin_from_environment()
+
+
+def recover_admin_from_environment():
+    """Apply an explicitly configured, one-time admin password recovery."""
+    email = os.environ.get("SCHOOLSYNC_ADMIN_RECOVERY_EMAIL", "").strip().lower()
+    password = os.environ.get("SCHOOLSYNC_ADMIN_RECOVERY_PASSWORD", "")
+    token = os.environ.get("SCHOOLSYNC_ADMIN_RECOVERY_TOKEN", "").strip()
+    if not email and not password and not token:
+        return
+    if not email or len(password) < 12 or len(password) > 128 or len(token) < 32:
+        print(
+            "Admin recovery skipped: set a valid recovery email, a password "
+            "of 12-128 characters, and a unique token of at least 32 characters."
+        )
+        return
+
+    import hashlib
+    from datetime import datetime, timezone
+
+    token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
+    with app.app_context():
+        db = database.get_db()
+        try:
+            # Serialize startup workers so this token can only be consumed once.
+            db.execute("BEGIN IMMEDIATE")
+            already_used = db.execute(
+                "SELECT 1 FROM admin_password_recoveries WHERE token_hash = ?",
+                (token_hash,),
+            ).fetchone()
+            if already_used:
+                db.rollback()
+                print("Admin recovery token was already used; no password was changed.")
+                return
+
+            admin = db.execute(
+                "SELECT id FROM users WHERE lower(email) = ? AND role = 'admin'",
+                (email,),
+            ).fetchone()
+            if admin is None:
+                db.rollback()
+                print("Admin recovery skipped: no admin account matches the recovery email.")
+                return
+
+            user_columns = {
+                row["name"] for row in db.execute("PRAGMA table_info(users)").fetchall()
+            }
+            assignments = ["password_hash = ?"]
+            values = [generate_password_hash(password)]
+            if "session_version" in user_columns:
+                assignments.append("session_version = COALESCE(session_version, 0) + 1")
+            if "must_change_password" in user_columns:
+                assignments.append("must_change_password = 0")
+            values.extend([admin["id"], email])
+            cursor = db.execute(
+                f"UPDATE users SET {', '.join(assignments)} "
+                "WHERE id = ? AND lower(email) = ? AND role = 'admin'",
+                values,
+            )
+            if cursor.rowcount != 1:
+                db.rollback()
+                print("Admin recovery skipped: the matching admin account could not be updated.")
+                return
+
+            db.execute(
+                "INSERT INTO admin_password_recoveries (token_hash, admin_email, used_at) "
+                "VALUES (?, ?, ?)",
+                (token_hash, email, datetime.now(timezone.utc).isoformat(timespec="seconds")),
+            )
+            db.commit()
+            print("Admin password recovery completed for the configured account.")
+        except Exception:
+            db.rollback()
+            raise
+
+
+recover_admin_from_environment()
 
 # Limits how many requests one IP address can make in a given window.
 # default_limits applies everywhere unless a route sets its own tighter

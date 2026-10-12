@@ -149,6 +149,15 @@ def ensure_schema_migrations():
                    FOREIGN KEY (target_id) REFERENCES users (id)
                )"""
         )
+        # A one-time recovery token prevents an admin recovery environment
+        # variable from resetting the password again on every worker restart.
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS admin_password_recoveries (
+                   token_hash TEXT PRIMARY KEY,
+                   admin_email TEXT NOT NULL,
+                   used_at TEXT NOT NULL DEFAULT (datetime('now'))
+               )"""
+        )
         conn.commit()
     except Exception:
         conn.rollback()
