@@ -12,7 +12,6 @@ from database import get_db
 
 VALID_STATUSES = ("Pending", "Approved", "Rejected")
 
-
 # ---------------------------------------------------------------------------
 # CREATE
 # ---------------------------------------------------------------------------
@@ -70,6 +69,24 @@ def get_events_by_creator(user_id):
         "SELECT * FROM events WHERE created_by = ? ORDER BY date DESC", (user_id,)
     ).fetchall()
     return rows
+
+
+def get_events_by_creator_roles(roles):
+    """Return events submitted by users with any of the supplied roles."""
+    roles = tuple(roles)
+    if not roles:
+        return []
+
+    placeholders = ", ".join("?" for _ in roles)
+    db = get_db()
+    return db.execute(
+        f"""SELECT events.*, users.name AS creator_name, users.role AS creator_role
+            FROM events
+            JOIN users ON users.id = events.created_by
+            WHERE users.role IN ({placeholders})
+            ORDER BY events.date DESC, events.start_time""",
+        roles,
+    ).fetchall()
 
 
 def get_events_by_status(status):
@@ -162,15 +179,18 @@ def event_time_display(event):
 def is_visible(event, user):
     """Can this user see this event at all?
     - Admin: sees everything.
-    - Staff: sees every Approved event, plus their own regardless of status.
+    - Staff: sees approved events and every staff/admin submission at any status.
     - Student: sees Approved events only.
     """
     if user["role"] == "admin":
         return True
     if event["status"] == "Approved":
         return True
-    if user["role"] == "staff" and event["created_by"] == user["id"]:
-        return True
+    if user["role"] == "staff":
+        creator = get_db().execute(
+            "SELECT role FROM users WHERE id = ?", (event["created_by"],)
+        ).fetchone()
+        return creator is not None and creator["role"] in ("staff", "admin")
     return False
 
 
@@ -178,35 +198,29 @@ def filter_visible(events, user):
     return [e for e in events if is_visible(e, user)]
 
 
+def staff_can_manage(event):
+    """Staff can manage events created by any staff or admin account."""
+    creator = get_db().execute(
+        "SELECT role FROM users WHERE id = ?", (event["created_by"],)
+    ).fetchone()
+    return creator is not None and creator["role"] in ("staff", "admin")
+
+
 def can_edit(event, user):
-    """Admin can edit anything. Staff can edit their own event, but only
-    while it's still Pending or Rejected — once Admin approves it, only
-    Admin can change it further (keeps the approved calendar trustworthy)."""
+    """Admins can edit any event; staff can edit staff/admin events at any status."""
     if user["role"] == "admin":
         return True
-    if user["role"] == "staff" and event["created_by"] == user["id"]:
-        return event["status"] in ("Pending", "Rejected")
-    return False
+    return user["role"] == "staff" and staff_can_manage(event)
 
 
 def can_delete(event, user):
-    """Admin can delete anything. Staff can delete their own event."""
+    """Admins can delete any event; staff can delete staff/admin events."""
     if user["role"] == "admin":
         return True
-    if user["role"] == "staff" and event["created_by"] == user["id"]:
-        return True
-    return False
-
+    return user["role"] == "staff" and staff_can_manage(event)
 
 def can_moderate(event, user):
-    """Who can approve/reject an event's status.
-    Admin: any event. Staff: only their own submissions — meaning staff
-    can approve/reject their own event, i.e. self-approve. That's a
-    deliberate product choice made for this app; it does mean the normal
-    "someone else checks your work" purpose of the approval workflow no
-    longer applies to staff-submitted events."""
+    """Admins moderate any event; staff moderate events created by staff/admin accounts."""
     if user["role"] == "admin":
         return True
-    if user["role"] == "staff" and event["created_by"] == user["id"]:
-        return True
-    return False    
+    return user["role"] == "staff" and staff_can_manage(event)

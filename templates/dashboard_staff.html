@@ -4,68 +4,104 @@
 
 <header class="page-head">
   <h1>Staff Dashboard</h1>
-  <p class="page-sub">Your submitted events and their approval status.</p>
+  <p class="page-sub">Review submissions and manage approved school events.</p>
 </header>
-
-<section class="stat-row">
-  <div class="stat-card stat-warn">
-    <div class="stat-value">{{ stats.pending }}</div> 
-    <div class="stat-label">Pending</div>
-  </div>
-  <div class="stat-card stat-good">
-    <div class="stat-value">{{ stats.approved }}</div>
-    <div class="stat-label">Approved</div>
-  </div>
-  <div class="stat-card stat-bad">
-    <div class="stat-value">{{ stats.rejected }}</div>
-    <div class="stat-label">Rejected</div>
-  </div>
-</section>
 
 <section class="quick-links">
   <a href="{{ url_for('calendar_view') }}" class="btn">📅 View Calendar</a>
-  <a href="{{ url_for('my_events') }}" class="btn">📋 All My Events</a>
   <a href="{{ url_for('new_event') }}" class="btn btn-primary">+ Submit Event</a>
 </section>
 
-{% if my_events %}
 <section class="recent-section">
-  <h2>Recent submissions</h2>
+  <h2>Needs your review</h2>
+  <p class="hint-text">Pending events from staff and admin accounts.</p>
   <div class="table-wrap">
     <table class="data-table">
-      <thead><tr><th>Title</th><th>Date</th><th>Status</th><th>Actions</th></tr></thead>
+      <thead><tr><th>Title</th><th>Date &amp; time</th><th>Status</th><th>Actions</th></tr></thead>
       <tbody>
-      {% for e in my_events %}
+      {% for e in recent_pending %}
         <tr>
           <td><a href="{{ url_for('event_detail', event_id=e.id) }}">{{ e.title }}</a></td>
-          <td>{{ e.date }}</td>
+          <td>{{ e.date }} · {% if e.start_time == 'TBA' or e.end_time == 'TBA' %}<span class="tba-badge tba-badge-inline">TBA</span>{% else %}{{ event_time_display(e) }}{% endif %}</td>
           <td><span class="status-pill status-{{ e.status | lower }}">{{ e.status }}</span></td>
           <td class="row-actions">
-            {% if e.status != 'Approved' %}
-              <form method="POST" action="{{ url_for('approve_event', event_id=e.id) }}">
-                <button type="submit" class="btn btn-small btn-good">Approve</button>
-              </form>
-            {% endif %}
-            {% if e.status != 'Rejected' %}
-              <form method="POST" action="{{ url_for('reject_event', event_id=e.id) }}">
-                <button type="submit" class="btn btn-small btn-warn">Reject</button>
-              </form>
-            {% endif %}
-            <form method="POST" action="{{ url_for('delete_event_route', event_id=e.id) }}"
-                  onsubmit="return confirm('Delete \'{{ e.title }}\'? This can\'t be undone.');">
+            <a href="{{ url_for('edit_event', event_id=e.id) }}" class="btn btn-small">Edit</a>
+            <form method="POST" action="{{ url_for('approve_event', event_id=e.id) }}">
+              <button type="submit" class="btn btn-small btn-good">Approve</button>
+            </form>
+            <form method="POST" action="{{ url_for('reject_event', event_id=e.id) }}">
+              <button type="submit" class="btn btn-small btn-warn">Reject</button>
+            </form>
+            <form method="POST" action="{{ url_for('delete_event_route', event_id=e.id) }}" onsubmit="return confirm('Delete this event? This can\'t be undone.');">
               <button type="submit" class="btn btn-small btn-danger">Delete</button>
             </form>
           </td>
         </tr>
+      {% else %}
+        <tr><td colspan="4" class="empty-state">There are no pending events to review.</td></tr>
       {% endfor %}
       </tbody>
     </table>
   </div>
 </section>
-{% endif %}
 
-<section class="notice-card">
-  <b>Not built yet:</b> Announcements — coming next.
+<section class="recent-section">
+  <h2>Rejected Events</h2>
+  <p class="hint-text">Rejected submissions remain available here for review.</p>
+  <div class="table-wrap">
+    <table class="data-table">
+      <thead><tr><th>Title</th><th>Date &amp; time</th><th>Status</th><th>Actions</th></tr></thead>
+      <tbody>
+      {% for e in rejected_events %}
+        <tr>
+          <td><a href="{{ url_for('event_detail', event_id=e.id) }}">{{ e.title }}</a></td>
+          <td>{{ e.date }} · {% if e.start_time == 'TBA' or e.end_time == 'TBA' %}<span class="tba-badge tba-badge-inline">TBA</span>{% else %}{{ event_time_display(e) }}{% endif %}</td>
+          <td><span class="status-pill status-rejected">Rejected</span></td>
+          <td class="row-actions">
+            <a href="{{ url_for('edit_event', event_id=e.id) }}" class="btn btn-small">Edit</a>
+            <form method="POST" action="{{ url_for('approve_event', event_id=e.id) }}">
+              <button type="submit" class="btn btn-small btn-good">Approve</button>
+            </form>
+            <form method="POST" action="{{ url_for('delete_event_route', event_id=e.id) }}" onsubmit="return confirm('Delete this event? This can\'t be undone.');">
+              <button type="submit" class="btn btn-small btn-danger">Delete</button>
+            </form>
+          </td>
+        </tr>
+      {% else %}
+        <tr><td colspan="4" class="empty-state">No rejected events.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+<section class="recent-section">
+  <h2>All Events</h2>
+  <p class="hint-text">Approved events only. You can edit, reject, or delete an event.</p>
+  <div class="all-events-box">
+    <table class="data-table">
+      <thead><tr><th>Title</th><th>Date &amp; time</th><th>Status</th><th>Actions</th></tr></thead>
+      <tbody>
+      {% for e in all_events %}
+        <tr>
+          <td><a href="{{ url_for('event_detail', event_id=e.id) }}">{{ e.title }}</a></td>
+          <td>{{ e.date }} · {% if e.start_time == 'TBA' or e.end_time == 'TBA' %}<span class="tba-badge tba-badge-inline">TBA</span>{% else %}{{ event_time_display(e) }}{% endif %}</td>
+          <td><span class="status-pill status-{{ e.status | lower }}">{{ e.status }}</span></td>
+          <td class="row-actions">
+            <a href="{{ url_for('edit_event', event_id=e.id) }}" class="btn btn-small">Edit</a>
+            <form method="POST" action="{{ url_for('reject_event', event_id=e.id) }}">
+              <button type="submit" class="btn btn-small btn-warn">Reject</button>
+            </form>
+            <form method="POST" action="{{ url_for('delete_event_route', event_id=e.id) }}" onsubmit="return confirm('Delete this event? This can\'t be undone.');">
+              <button type="submit" class="btn btn-small btn-danger">Delete</button>
+            </form>
+          </td>
+        </tr>
+      {% else %}
+        <tr><td colspan="4" class="empty-state">No approved events yet.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
 </section>
 
 {% endblock %}

@@ -1,3 +1,6 @@
+import sqlite3
+from datetime import datetime, timezone
+
 from werkzeug.security import generate_password_hash, check_password_hash
 from database import get_db
 
@@ -118,6 +121,69 @@ def update_password(user_id, new_password):
     db = get_db()
     password_hash = generate_password_hash(new_password)
     db.execute("UPDATE users SET password_hash = ? WHERE id = ?", (password_hash, user_id))
+    db.commit()
+
+
+def admin_reset_password(admin_id, target_id, new_password):
+    """Admin resets a Student's or Staff member's password.
+
+    In ONE database transaction this:
+      1. stores the new password's HASH (never the password itself),
+      2. flags the account so its owner must choose a new password at
+         their next login (must_change_password = 1),
+      3. bumps session_version so any session that account already had
+         open stops working (the Admin's own session is untouched — it
+         belongs to a different row),
+      4. writes an audit_log row: who, whom, when, what, outcome.
+         The password and the hash are never written to the log.
+
+    The `role IN ('student', 'staff')` condition is a second safety net:
+    even if a route let an Admin id through by mistake, an Admin
+    account's password can't be changed by this function.
+
+    Returns True on success, False if no such resettable account exists.
+    Raises sqlite3.Error on a database failure (after rolling back)."""
+    db = get_db()
+    password_hash = generate_password_hash(new_password)
+    now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    try:
+        cursor = db.execute(
+            """UPDATE users
+                  SET password_hash = ?,
+                      must_change_password = 1,
+                      session_version = session_version + 1
+                WHERE id = ? AND role IN ('student', 'staff')""",
+            (password_hash, target_id),
+        )
+        if cursor.rowcount != 1:
+            db.rollback()
+            return False
+        db.execute(
+            """INSERT INTO audit_log (admin_id, target_user_id, action, status, created_at)
+               VALUES (?, ?, ?, ?, ?)""",
+            (admin_id, target_id, "admin_password_reset", "success", now),
+        )
+        db.commit()
+        return True
+    except sqlite3.Error:
+        db.rollback()
+        raise
+
+
+def complete_forced_password_change(user_id, new_password):
+    """The affected user has chosen their own permanent password: store
+    its hash, clear the must-change flag, and bump session_version so
+    any other session still using the temporary password is cut off."""
+    db = get_db()
+    password_hash = generate_password_hash(new_password)
+    db.execute(
+        """UPDATE users
+              SET password_hash = ?,
+                  must_change_password = 0,
+                  session_version = session_version + 1
+            WHERE id = ?""",
+        (password_hash, user_id),
+    )
     db.commit()
 
 

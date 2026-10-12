@@ -48,11 +48,19 @@
             {% else %}
               <span class="status-pill status-rejected">Deactivated</span>
             {% endif %}
+            {% if u.must_change_password %}
+              <span class="status-pill status-pending" title="An Admin reset this password; they must choose a new one at next login.">Password reset pending</span>
+            {% endif %}
           </td>
           <td>{{ u.created_at[:10] }}</td>
           <td class="row-actions">
             <a href="{{ url_for('edit_account', user_id=u.id) }}" class="btn btn-small">Edit</a>
             {% if u.id != current_user.id %}
+              {% if u.role in ['student', 'staff'] %}
+                <button type="button" class="btn btn-small js-reset-password"
+                        data-action="{{ url_for('reset_account_password', user_id=u.id) }}"
+                        data-name="{{ u.name }}" data-role="{{ u.role | capitalize }}">Reset Password</button>
+              {% endif %}
               <form method="POST" action="{{ url_for('toggle_active', user_id=u.id) }}">
                 {% if u.is_active %}
                   <button type="submit" class="btn btn-small btn-warn"
@@ -76,5 +84,118 @@
     </table>
   </div>
 </section>
+
+{% endblock %}
+
+{% block modals %}
+<!-- Reset Password confirmation modal. One shared modal; the buttons above
+     fill in the name, role and form action for whichever row was clicked. -->
+<div class="modal-backdrop" id="reset-modal" hidden>
+  <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="reset-modal-title">
+    <h2 id="reset-modal-title">Reset password</h2>
+    <p class="modal-sub">
+      You are about to reset the password for <b id="reset-modal-name"></b>
+      (<span id="reset-modal-role"></span>). Their current password can't be
+      viewed or recovered. They will have to choose a new password the next
+      time they log in.
+    </p>
+
+    <form method="POST" id="reset-form" action="">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+      <div class="reset-options">
+        <label class="reset-option">
+          <input type="radio" name="mode" value="generate" checked>
+          <span><b>Generate a temporary password</b>
+            <small>A random, secure password is created and shown to you once.</small></span>
+        </label>
+        <label class="reset-option">
+          <input type="radio" name="mode" value="manual">
+          <span><b>Set a temporary password myself</b>
+            <small>Type one in (at least 8 characters).</small></span>
+        </label>
+      </div>
+
+      <div id="reset-manual-field" hidden>
+        <label for="reset-temp-password">Temporary password</label>
+        <div class="password-field">
+          <input type="password" id="reset-temp-password" name="temp_password" minlength="8" maxlength="128" autocomplete="new-password" disabled>
+          <button type="button" class="password-toggle" aria-label="Show password">
+            <svg class="icon-eye" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/><circle cx="12" cy="12" r="3"/>
+            </svg>
+            <svg class="icon-eye-off" style="display:none" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M17.94 17.94A10.94 10.94 0 0 1 12 19c-7 0-11-7-11-7a20.6 20.6 0 0 1 4.22-5.06M9.9 4.24A10.4 10.4 0 0 1 12 4c7 0 11 7 11 7a20.6 20.6 0 0 1-3.22 4.19M14.12 14.12a3 3 0 1 1-4.24-4.24"/>
+              <line x1="1" y1="1" x2="23" y2="23"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      <div class="modal-actions">
+        <button type="button" class="btn" id="reset-cancel">Cancel</button>
+        <button type="submit" class="btn btn-warn" id="reset-submit">Reset password</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script>
+(function () {
+  var modal = document.getElementById("reset-modal");
+  var form = document.getElementById("reset-form");
+  var nameEl = document.getElementById("reset-modal-name");
+  var roleEl = document.getElementById("reset-modal-role");
+  var manualField = document.getElementById("reset-manual-field");
+  var manualInput = document.getElementById("reset-temp-password");
+  var submitBtn = document.getElementById("reset-submit");
+  var cancelBtn = document.getElementById("reset-cancel");
+  var modes = form.querySelectorAll('input[name="mode"]');
+  var lastTrigger = null;
+
+  // Show the typed-password box only for "Set it myself". A disabled
+  // input is never submitted, so "Generate" can't send a stray password.
+  function syncMode() {
+    var manual = form.querySelector('input[name="mode"]:checked').value === "manual";
+    manualField.hidden = !manual;
+    manualInput.disabled = !manual;
+    manualInput.required = manual;
+    if (manual) { manualInput.focus(); }
+  }
+
+  function openModal(btn) {
+    lastTrigger = btn;
+    form.action = btn.dataset.action;
+    nameEl.textContent = btn.dataset.name;   // textContent, never innerHTML
+    roleEl.textContent = btn.dataset.role;
+    modes[0].checked = true;
+    manualInput.value = "";
+    submitBtn.disabled = false;
+    syncMode();
+    modal.hidden = false;
+    document.body.classList.add("modal-open");
+    cancelBtn.focus();
+  }
+
+  function closeModal() {
+    modal.hidden = true;
+    document.body.classList.remove("modal-open");
+    manualInput.value = "";
+    if (lastTrigger) { lastTrigger.focus(); }
+  }
+
+  document.querySelectorAll(".js-reset-password").forEach(function (btn) {
+    btn.addEventListener("click", function () { openModal(btn); });
+  });
+  modes.forEach(function (m) { m.addEventListener("change", syncMode); });
+  cancelBtn.addEventListener("click", closeModal);
+  modal.addEventListener("click", function (e) { if (e.target === modal) { closeModal(); } });
+  document.addEventListener("keydown", function (e) {
+    if (e.key === "Escape" && !modal.hidden) { closeModal(); }
+  });
+  // One click = one reset (a double-click would otherwise reset twice).
+  form.addEventListener("submit", function () { submitBtn.disabled = true; });
+})();
+</script>
 
 {% endblock %}

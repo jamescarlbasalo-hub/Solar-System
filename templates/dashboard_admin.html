@@ -20,6 +20,10 @@
     <div class="stat-value">{{ stats.approved_events }}</div>
     <div class="stat-label">Approved Events</div>
   </div>
+  <div class="stat-card stat-bad">
+    <div class="stat-value">{{ stats.rejected_events }}</div>
+    <div class="stat-label">Rejected Events</div>
+  </div>
   <div class="stat-card">
     <div class="stat-value">{{ stats.total_students }}</div>
     <div class="stat-label">Total Students</div>
@@ -49,20 +53,16 @@
           <td><a href="{{ url_for('event_detail', event_id=e.id) }}">{{ e.title }}</a></td>
           <td>{{ e.date }}</td>
           <td class="row-actions">
-            <!-- Edit Button -->
             <a href="{{ url_for('edit_event', event_id=e.id) }}" class="btn btn-small">Edit</a>
 
-            <!-- Approve Button Form -->
             <form method="POST" action="{{ url_for('approve_event', event_id=e.id) }}">
               <button type="submit" class="btn btn-small btn-good">Approve</button>
             </form>
 
-            <!-- Reject Button Form -->
             <form method="POST" action="{{ url_for('reject_event', event_id=e.id) }}">
               <button type="submit" class="btn btn-small btn-warn">Reject</button>
             </form>
 
-            <!-- Delete Button Form -->
             <form method="POST" action="{{ url_for('delete_event_route', event_id=e.id) }}"
                   onsubmit="return confirm('Delete \'{{ e.title }}\'? This can\'t be undone.');">
               <button type="submit" class="btn btn-small btn-danger">Delete</button>
@@ -77,8 +77,37 @@
 {% endif %}
 
 <section class="recent-section">
-  <h2>All Events</h2>
-  <p class="hint-text">Every event in the system. Edit or delete any of them from here.</p>
+  <h2>Rejected Events</h2>
+  <p class="hint-text">Rejected submissions remain available here for review.</p>
+  <div class="table-wrap">
+    <table class="data-table">
+      <thead><tr><th>Title</th><th>Date &amp; time</th><th>Status</th><th>Actions</th></tr></thead>
+      <tbody>
+      {% for e in rejected_events %}
+        <tr>
+          <td><a href="{{ url_for('event_detail', event_id=e.id) }}">{{ e.title }}</a></td>
+          <td>{{ e.date }} · {% if e.start_time == 'TBA' or e.end_time == 'TBA' %}<span class="tba-badge tba-badge-inline">TBA</span>{% else %}{{ event_time_display(e) }}{% endif %}</td>
+          <td><span class="status-pill status-rejected">Rejected</span></td>
+          <td class="row-actions">
+            <a href="{{ url_for('edit_event', event_id=e.id) }}" class="btn btn-small">Edit</a>
+            <form method="POST" action="{{ url_for('approve_event', event_id=e.id) }}">
+              <button type="submit" class="btn btn-small btn-good">Approve</button>
+            </form>
+            <form method="POST" action="{{ url_for('delete_event_route', event_id=e.id) }}" onsubmit="return confirm('Delete this event? This can\'t be undone.');">
+              <button type="submit" class="btn btn-small btn-danger">Delete</button>
+            </form>
+          </td>
+        </tr>
+      {% else %}
+        <tr><td colspan="4" class="empty-state">No rejected events.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+<section class="recent-section">
+  <h2>All Approved  Events</h2>
+  <p class="hint-text">Approved events only. Edit, reject, or delete any event from here.</p>
   <div class="all-events-box">
     <table class="data-table">
       <thead><tr><th>Title</th><th>Date &amp; time</th><th>Status</th><th>Actions</th></tr></thead>
@@ -97,6 +126,9 @@
           <td><span class="status-pill status-{{ e.status | lower }}">{{ e.status }}</span></td>
           <td class="row-actions">
             <a href="{{ url_for('edit_event', event_id=e.id) }}" class="btn btn-small">Edit</a>
+            <form method="POST" action="{{ url_for('reject_event', event_id=e.id) }}">
+              <button type="submit" class="btn btn-small btn-warn">Reject</button>
+            </form>
             <form method="POST" action="{{ url_for('delete_event_route', event_id=e.id) }}"
                   onsubmit="return confirm('Delete this event? This can\'t be undone.');">
               <button type="submit" class="btn btn-small btn-danger">Delete</button>

@@ -5,8 +5,9 @@ SchoolSync — School Event Calendar and Announcement System.
 
 Built so far: project setup, database, Users table, login/signup/logout,
 Events CRUD with the Pending -> Approved/Rejected approval workflow, the
-month calendar, and Admin's Manage Accounts page. Announcements are the
-one module from the original plan not yet built.
+month calendar, Admin's Manage Accounts page (including Admin password
+reset with a forced change at next login). Announcements are the one
+module from the original plan not yet built.
 
 Run with:
     python app.py
@@ -14,10 +15,13 @@ Then open http://127.0.0.1:5000
 """
 
 import os
+import sqlite3
 import calendar as cal
 from datetime import date as date_cls, datetime, timedelta
 
-from flask import Flask, render_template, request, redirect, url_for, session, flash
+from flask import (
+    Flask, render_template, request, redirect, url_for, session, flash, make_response,
+)
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 
@@ -26,11 +30,11 @@ from models import (
     get_user_by_email, get_user_by_id, verify_password, count_users_by_role,
     create_user, get_all_users, delete_user,
     update_user_account, set_user_active, update_own_profile, update_password,
-    set_last_profile_update,
+    set_last_profile_update, admin_reset_password, complete_forced_password_change,
 )
 from events import (
     create_event, get_event_by_id, get_events_by_month, get_events_by_date,
-    get_events_by_creator, get_events_by_status, get_all_events, get_upcoming_approved_events,
+    get_events_by_creator, get_events_by_creator_roles, get_events_by_status, get_upcoming_approved_events,
     get_todays_approved_events, count_all_events, count_events_by_status,
     update_event, set_event_status, delete_event,
     is_visible, filter_visible, can_edit, can_delete, can_moderate, event_time_display,
@@ -38,6 +42,8 @@ from events import (
 from utils import (
     login_required, role_required, current_user, validate_signup_fields,
     validate_event_fields, validate_profile_fields, ROLE_DASHBOARDS,
+    CSRF_SAFE_METHODS, get_csrf_token, csrf_token_is_valid, csrf_error_response,
+    generate_temporary_password, validate_temporary_password, validate_new_password,
 )
 
 app = Flask(__name__)
@@ -48,6 +54,10 @@ app.secret_key = os.environ.get("SECRET_KEY", "dev-only-change-this-before-deplo
 # POST body in full — a handful of those at once is enough to exhaust
 # server RAM. 1 MB is generous for anything this app's forms send.
 app.config["MAX_CONTENT_LENGTH"] = 1 * 1024 * 1024
+
+# Browsers won't attach the login cookie to a form posted from another
+# website. A second layer on top of the CSRF tokens below.
+app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 
 database.init_app(app)  # makes sure the DB connection closes after each request
 database.ensure_schema_migrations()  # adds users.is_active if it isn't there yet
@@ -72,6 +82,35 @@ def inject_user():
 # Lets any template call event_time_display(event) to print "Time to be
 # announced" for TBA events instead of a raw "TBA" string.
 app.jinja_env.globals["event_time_display"] = event_time_display
+
+# Lets templates use {{ csrf_token() }} (base.html uses it to protect every form).
+app.jinja_env.globals["csrf_token"] = get_csrf_token
+
+
+@app.before_request
+def check_csrf_token():
+    """Runs before EVERY request. Any request that changes something
+    (POST etc.) must carry this session's secret token, or it is refused
+    before it reaches any route. This covers every form on the site."""
+    if request.method not in CSRF_SAFE_METHODS and not csrf_token_is_valid():
+        return csrf_error_response()
+
+
+# While an Admin-reset password is still waiting to be replaced, these
+# are the ONLY pages the account may open. Everything else — dashboards,
+# calendar, events, account settings, typed-in URLs — is redirected to
+# the Change Password page.
+FORCED_CHANGE_ALLOWED_ENDPOINTS = {"change_password", "logout", "static"}
+
+
+@app.before_request
+def enforce_forced_password_change():
+    """Runs before EVERY request, so the rule can't be dodged by typing a
+    dashboard URL by hand."""
+    user = current_user()
+    if (user is not None and user["must_change_password"]
+            and request.endpoint not in FORCED_CHANGE_ALLOWED_ENDPOINTS):
+        return redirect(url_for("change_password"))
 
 
 # ---------------------------------------------------------------------------
@@ -106,6 +145,14 @@ def login():
             return render_template("login.html")
 
         session["user_id"] = user["id"]
+        session["sv"] = user["session_version"]  # see utils.current_user()
+
+        # An Admin reset this account's password: the person must pick a
+        # new one before they can use anything else.
+        if user["must_change_password"]:
+            flash("An administrator reset your password. Please choose a new one to continue.", "success")
+            return redirect(url_for("change_password"))
+
         flash(f"Welcome back, {user['name']}!", "success")
         return redirect(url_for(ROLE_DASHBOARDS[user["role"]]))
 
@@ -137,6 +184,7 @@ def signup():
             return render_template("signup.html", name=name, email=email)
 
         session["user_id"] = user_id
+        session["sv"] = 0  # a brand-new account starts at session_version 0
         flash(f"Welcome to SchoolSync, {name}!", "success")
         return redirect(url_for("student_dashboard"))
 
@@ -162,24 +210,28 @@ def admin_dashboard():
         "total_events": count_all_events(),
         "pending_events": count_events_by_status("Pending"),
         "approved_events": count_events_by_status("Approved"),
+        "rejected_events": count_events_by_status("Rejected"),
     }
-    recent_pending = get_events_by_status("Pending")[:5]
-    all_events = get_all_events()
+    recent_pending = get_events_by_status("Pending")
+    all_events = get_events_by_status("Approved")
+    rejected_events = get_events_by_status("Rejected")
     return render_template("dashboard_admin.html", stats=stats,
-                           recent_pending=recent_pending, all_events=all_events)
+                           recent_pending=recent_pending, all_events=all_events,
+                           rejected_events=rejected_events)
 
 
 @app.route("/staff/dashboard")
 @role_required("staff")
 def staff_dashboard():
-    user = current_user()
-    my_events = get_events_by_creator(user["id"])
-    stats = {
-        "pending": sum(1 for e in my_events if e["status"] == "Pending"),
-        "approved": sum(1 for e in my_events if e["status"] == "Approved"),
-        "rejected": sum(1 for e in my_events if e["status"] == "Rejected"),
-    }
-    return render_template("dashboard_staff.html", my_events=my_events[:5], stats=stats)
+    recent_pending = get_events_by_status("Pending")
+    all_events = get_events_by_status("Approved")
+    rejected_events = get_events_by_status("Rejected")
+    return render_template(
+        "dashboard_staff.html",
+        recent_pending=recent_pending,
+        all_events=all_events,
+        rejected_events=rejected_events,
+    )
 
 
 @app.route("/student/dashboard")
@@ -207,7 +259,7 @@ def calendar_view():
         month, year = 1, year + 1
 
     user = current_user()
-    visible_events = filter_visible(get_events_by_month(year, month), user)
+    visible_events = [event for event in filter_visible(get_events_by_month(year, month), user) if event["status"] == "Approved"]
 
     events_by_day = {}
     for e in visible_events:
@@ -239,7 +291,7 @@ def calendar_day(date_str):
         return redirect(url_for("calendar_view"))
 
     user = current_user()
-    events = filter_visible(get_events_by_date(date_str), user)
+    events = [event for event in filter_visible(get_events_by_date(date_str), user) if event["status"] == "Approved"]
     return render_template("calendar_day.html", date_str=date_str, day_date=day_date, events=events)
 
 
@@ -393,14 +445,13 @@ def reject_event(event_id):
 @app.route("/events/pending")
 @role_required("admin")
 def pending_events():
-    events = get_events_by_status("Pending")
+    events = get_events_by_creator_roles(("staff",))
     return render_template("pending_events.html", events=events)
-
 
 @app.route("/events/mine")
 @role_required("staff")
 def my_events():
-    events = get_events_by_creator(current_user()["id"])
+    events = get_events_by_creator_roles(("staff",))
     return render_template("my_events.html", events=events)
 
 
@@ -508,6 +559,108 @@ def toggle_active(user_id):
         "success",
     )
     return redirect(url_for("manage_accounts"))
+
+
+@app.route("/admin/accounts/<int:user_id>/reset-password", methods=["POST"])
+@role_required("admin")
+@limiter.limit("20 per minute")
+def reset_account_password(user_id):
+    """Admin resets a Student's or Staff member's password to a temporary
+    one. The old password is never read or shown (only a hash is stored,
+    and a hash can't be reversed). The new temporary password is shown
+    once, on the response to this request, and is never saved anywhere
+    in readable form."""
+    admin = current_user()
+    target = get_user_by_id(user_id)
+
+    # The user id comes from the URL, which anyone could edit by hand — so
+    # every rule is re-checked here on the server, never trusted from the form.
+    if target is None:
+        flash("That account doesn't exist.", "error")
+        return redirect(url_for("manage_accounts"))
+    if target["id"] == admin["id"]:
+        flash("Use Account Settings to change your own password.", "error")
+        return redirect(url_for("manage_accounts"))
+    if target["role"] not in ("student", "staff"):
+        flash("Admin passwords can't be reset from here.", "error")
+        return redirect(url_for("manage_accounts"))
+
+    mode = request.form.get("mode", "")
+    if mode == "generate":
+        temp_password = generate_temporary_password()
+    elif mode == "manual":
+        temp_password = request.form.get("temp_password", "")
+        errors = validate_temporary_password(temp_password)
+        if errors:
+            for e in errors:
+                flash(e, "error")
+            return redirect(url_for("manage_accounts"))
+    else:
+        flash("Please choose how to set the temporary password.", "error")
+        return redirect(url_for("manage_accounts"))
+
+    try:
+        reset_done = admin_reset_password(admin["id"], target["id"], temp_password)
+    except sqlite3.Error:
+        # Deliberately generic, and the password is never logged.
+        app.logger.error("Password reset failed (database error) for user id %s", target["id"])
+        flash("Something went wrong and the password was not reset. Please try again.", "error")
+        return redirect(url_for("manage_accounts"))
+
+    if not reset_done:
+        flash("That account's password could not be reset.", "error")
+        return redirect(url_for("manage_accounts"))
+
+    # Rendered directly (not redirected) so the temporary password is
+    # never placed in the session cookie. no-store tells browsers and
+    # proxies not to keep a copy of this page.
+    response = make_response(render_template(
+        "password_reset_result.html",
+        target=target,
+        mode=mode,
+        temp_password=temp_password if mode == "generate" else None,
+    ))
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@app.route("/change-password", methods=["GET", "POST"])
+@login_required
+@limiter.limit("10 per minute")
+def change_password():
+    """The page an account lands on after an Admin reset its password.
+    It is the only page (besides Log out) that account can use until it
+    chooses a new permanent password."""
+    user = current_user()
+
+    # Nobody else needs this page. Everyone else changes their password
+    # on Account Settings, which has the 30-day limit — so this page
+    # can't be used to get around it.
+    if not user["must_change_password"]:
+        return redirect(url_for("account_settings"))
+
+    if request.method == "POST":
+        new_password = request.form.get("new_password", "")
+        confirm_password = request.form.get("confirm_password", "")
+
+        errors = validate_new_password(new_password, confirm_password)
+        if not errors and verify_password(user, new_password):
+            errors.append("Your new password must be different from the temporary one.")
+        if errors:
+            for e in errors:
+                flash(e, "error")
+            return render_template("change_password.html")
+
+        complete_forced_password_change(user["id"], new_password)
+        # Keep THIS browser signed in: the version number changed, so
+        # copy the new one into this session. Any other session that
+        # still used the temporary password is now ended.
+        session["sv"] = get_user_by_id(user["id"])["session_version"]
+
+        flash("Password updated. Welcome back!", "success")
+        return redirect(url_for(ROLE_DASHBOARDS[user["role"]]))
+
+    return render_template("change_password.html")
 
 
 # ---------------------------------------------------------------------------
@@ -622,3 +775,6 @@ def server_error(e):
 
 if __name__ == "__main__":
     app.run(debug=True)
+
+
+
