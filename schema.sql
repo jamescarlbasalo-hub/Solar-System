@@ -1,14 +1,3 @@
--- schema.sql
--- --------------------------------------------------------------------
--- This file defines the shape of the database: 3 tables, matching the
--- ERD from the plan. It's applied once by database.py's init_db().
---
--- We create all 3 tables now (even though this step only builds the
--- Users feature) so the database structure is settled early and later
--- steps (Events, Announcements) just start using tables that already
--- exist.
--- --------------------------------------------------------------------
-
 DROP TABLE IF EXISTS users;
 DROP TABLE IF EXISTS events;
 DROP TABLE IF EXISTS announcements;

@@ -41,7 +41,6 @@
   <a href="{{ url_for('new_event') }}" class="btn btn-primary">+ New Event</a>
 </section>
 
-{% if recent_pending %}
 <section class="recent-section">
   <h2>Needs your review</h2>
   <div class="table-wrap">
@@ -69,12 +68,13 @@
             </form>
           </td>
         </tr>
+      {% else %}
+        <tr><td colspan="3" class="empty-state">There are no pending events to review.</td></tr>
       {% endfor %}
       </tbody>
     </table>
   </div>
 </section>
-{% endif %}
 
 <section class="recent-section">
   <h2>Rejected Events</h2>

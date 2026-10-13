@@ -1,19 +1,3 @@
-"""
-app.py
-------
-SchoolSync — School Event Calendar and Announcement System.
-
-Built so far: project setup, database, Users table, login/signup/logout,
-Events CRUD with the Pending -> Approved/Rejected approval workflow, the
-month calendar, Admin's Manage Accounts page (including Admin password
-reset with a forced change at next login). Announcements are the one
-module from the original plan not yet built.
-
-Run with:
-    python app.py
-Then open http://127.0.0.1:5000
-"""
-
 import os
 import calendar as cal
 from datetime import date as date_cls, datetime, timedelta
