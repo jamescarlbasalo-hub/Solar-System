@@ -7,19 +7,21 @@
   <p class="page-sub">Update your name, email, or password.</p>
 </header>
 
-{% if on_cooldown %}
+{% if on_name_cooldown %}
 <section class="notice-card" style="margin-bottom: 20px;">
-  <b>You've already updated your account recently.</b>
-  You can make changes again on <b>{{ next_eligible.strftime('%B %d, %Y') }}</b>.
-  This limit is in place so the account-edit feature can't be used to repeatedly swap emails or passwords.
+  <b>Your name was changed recently.</b>
+  You can change it again on <b>{{ next_name_eligible.strftime('%B %d, %Y') }}</b>.
+  You can still update your email and password anytime.
 </section>
 {% endif %}
 
 <section class="form-card">
   <form method="POST" action="{{ url_for('account_settings') }}">
-    <fieldset {{ 'disabled' if on_cooldown else '' }} style="border: none; padding: 0; margin: 0;">
     <label for="name">Full name</label>
-    <input type="text" id="name" name="name" value="{{ form.name or '' }}" maxlength="100" required>
+    <input type="text" id="name" name="name" value="{{ form.name or '' }}" maxlength="100" required {{ 'disabled' if on_name_cooldown else '' }}>
+    {% if current_user.role == 'student' and not on_name_cooldown %}
+      <p class="hint-text">Students can change their name once every 30 days.</p>
+    {% endif %}
 
     <label for="email">Email</label>
     <input type="email" id="email" name="email" value="{{ form.email or '' }}" required>
@@ -70,11 +72,7 @@
         </button>
       </div>
     </div>
-    </fieldset>
-
-    <button type="submit" class="btn btn-primary btn-block" {{ 'disabled' if on_cooldown else '' }}>
-      {{ 'Locked until next eligible date' if on_cooldown else 'Save Changes' }}
-    </button>
+    <button type="submit" class="btn btn-primary btn-block">Save Changes</button>
   </form>
 </section>
 

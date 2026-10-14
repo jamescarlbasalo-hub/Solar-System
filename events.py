@@ -1,7 +1,13 @@
-from datetime import date as date_cls, datetime
+from datetime import date as date_cls, datetime, timedelta, timezone
 from database import get_db
 
 VALID_STATUSES = ("Pending", "Approved", "Rejected")
+SCHOOL_TIMEZONE = timezone(timedelta(hours=8))
+
+
+def school_today():
+    """Return today's date in the school's Philippines timezone (UTC+8)."""
+    return datetime.now(SCHOOL_TIMEZONE).date()
 
 # ---------------------------------------------------------------------------
 # CREATE
@@ -95,7 +101,7 @@ def get_events_by_status(status):
 
 def get_upcoming_approved_events(limit=5):
     db = get_db()
-    today_str = date_cls.today().isoformat()
+    today_str = school_today().isoformat()
     rows = db.execute(
         """SELECT * FROM events WHERE status = 'Approved' AND date > ?
            ORDER BY date, start_time LIMIT ?""",
@@ -106,7 +112,7 @@ def get_upcoming_approved_events(limit=5):
 
 def get_todays_approved_events():
     db = get_db()
-    today_str = date_cls.today().isoformat()
+    today_str = school_today().isoformat()
     rows = db.execute(
         "SELECT * FROM events WHERE status = 'Approved' AND date = ? ORDER BY start_time",
         (today_str,),

@@ -11,8 +11,8 @@
   <a href="{{ url_for('calendar_view') }}" class="btn btn-primary">📅 View Full Calendar</a>
 </section>
 
-<section class="two-col">
-  <div>
+<section class="two-col student-event-columns">
+  <div class="student-event-group">
     <h2>Today's Events</h2>
     {% if todays %}
       <div class="event-list">
@@ -34,7 +34,7 @@
     {% endif %}
   </div>
 
-  <div>
+  <div class="student-event-group">
     <h2>Upcoming Events</h2>
     {% if upcoming %}
       <div class="event-list">

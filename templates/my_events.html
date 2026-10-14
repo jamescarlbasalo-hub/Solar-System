@@ -1,11 +1,11 @@
 {% extends "base.html" %}
-{% block title %}Staff Events — SchoolSync{% endblock %}
+{% block title %}All Events — SchoolSync{% endblock %}
 {% block content %}
 
 <header class="page-head">
   <div>
-    <h1>Staff Events</h1>
-    <p class="page-sub">Shared list of events submitted by staff accounts.</p>
+    <h1>All Events</h1>
+    <p class="page-sub">All events submitted by staff and admin accounts.</p>
   </div>
   <a href="{{ url_for('new_event') }}" class="btn btn-primary">+ New Event</a>
 </header>
@@ -45,7 +45,7 @@
         </td>
       </tr>
     {% else %}
-      <tr><td colspan="4" class="empty-state">No staff events have been submitted yet.</td></tr>
+      <tr><td colspan="4" class="empty-state">No events have been submitted yet.</td></tr>
     {% endfor %}
     </tbody>
   </table>

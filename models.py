@@ -117,6 +117,13 @@ def set_last_profile_update(user_id, timestamp):
     db.commit()
 
 
+def set_last_name_change(user_id, timestamp):
+    """Record the time a student last changed their own name."""
+    db = get_db()
+    db.execute("UPDATE users SET last_name_change = ? WHERE id = ?", (timestamp, user_id))
+    db.commit()
+
+
 def update_password(user_id, new_password):
     """Hashes and stores a new password the same way create_user() does."""
     db = get_db()

@@ -7,6 +7,25 @@
   <p class="page-sub">Review submissions and manage approved school events.</p>
 </header>
 
+<section class="stat-row" aria-label="Event statistics">
+  <div class="stat-card">
+    <div class="stat-value">{{ stats.total_events }}</div>
+    <div class="stat-label">Total Events</div>
+  </div>
+  <div class="stat-card stat-warn">
+    <div class="stat-value">{{ stats.pending_events }}</div>
+    <div class="stat-label">Pending Events</div>
+  </div>
+  <div class="stat-card stat-good">
+    <div class="stat-value">{{ stats.approved_events }}</div>
+    <div class="stat-label">Approved Events</div>
+  </div>
+  <div class="stat-card stat-bad">
+    <div class="stat-value">{{ stats.rejected_events }}</div>
+    <div class="stat-label">Rejected Events</div>
+  </div>
+</section>
+
 <section class="quick-links">
   <a href="{{ url_for('calendar_view') }}" class="btn">📅 View Calendar</a>
   <a href="{{ url_for('new_event') }}" class="btn btn-primary">+ Submit Event</a>

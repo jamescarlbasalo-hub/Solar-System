@@ -378,7 +378,7 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
 /* ---------- Admin dashboard: All Events manager ---------- */
 .all-events-box {
   background: var(--card); border: 1px solid var(--border); border-radius: var(--radius);
-  padding: 6px 16px; max-height: 440px; overflow: auto;
+  padding: 6px 16px; overflow: auto;
 }
 .all-events-box .data-table { min-width: 560px; }
 .all-events-box .data-table th {
@@ -887,4 +887,13 @@ input:-webkit-autofill,input:-webkit-autofill:hover,input:-webkit-autofill:focus
 #copy-temp-password.btn:hover {
   color: #fff;
   background: rgba(157,114,255,.3);
+}
+
+/* Student dashboard: stack event groups and allow long locations to wrap on phones. */
+.student-event-group { min-width: 0; }
+.student-event-group .event-card-meta { overflow-wrap: anywhere; }
+@media (max-width: 720px) {
+  .student-event-columns { grid-template-columns: minmax(0, 1fr); gap: 18px; }
+  .student-event-group { width: 100%; }
+  .student-event-group .event-card { padding: 14px; }
 }

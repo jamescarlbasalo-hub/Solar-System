@@ -1,6 +1,6 @@
 import os
 import calendar as cal
-from datetime import date as date_cls, datetime, timedelta
+from datetime import datetime, timedelta
 
 from flask import (
     Flask, render_template, request, redirect, url_for, session, flash, make_response,
@@ -14,13 +14,13 @@ from models import (
     get_user_by_email, get_user_by_id, verify_password, count_users_by_role,
     create_user, get_all_users, delete_user,
     update_user_account, set_user_active, update_own_profile, update_password,
-    set_last_profile_update, admin_reset_password, complete_forced_password_change,
+    set_last_name_change, admin_reset_password, complete_forced_password_change,
 )
 from events import (
     create_event, get_event_by_id, get_events_by_month, get_events_by_date,
     get_events_by_creator, get_events_by_creator_roles, get_events_by_status, get_upcoming_approved_events,
     get_todays_approved_events, count_all_events, count_events_by_status,
-    update_event, set_event_status, delete_event,
+    update_event, set_event_status, delete_event, school_today,
     is_visible, filter_visible, can_edit, can_delete, can_moderate, event_time_display,
 )
 from utils import (
@@ -298,11 +298,18 @@ def admin_dashboard():
 @app.route("/staff/dashboard")
 @role_required("staff")
 def staff_dashboard():
+    stats = {
+        "total_events": count_all_events(),
+        "pending_events": count_events_by_status("Pending"),
+        "approved_events": count_events_by_status("Approved"),
+        "rejected_events": count_events_by_status("Rejected"),
+    }
     recent_pending = get_events_by_status("Pending")
     all_events = get_events_by_status("Approved")
     rejected_events = get_events_by_status("Rejected")
     return render_template(
         "dashboard_staff.html",
+        stats=stats,
         recent_pending=recent_pending,
         all_events=all_events,
         rejected_events=rejected_events,
@@ -323,7 +330,7 @@ def student_dashboard():
 @app.route("/calendar")
 @login_required
 def calendar_view():
-    today = date_cls.today()
+    today = school_today()
     year = request.args.get("year", today.year, type=int)
     month = request.args.get("month", today.month, type=int)
 
@@ -515,13 +522,13 @@ def reject_event(event_id):
 @app.route("/events/pending")
 @role_required("admin")
 def pending_events():
-    events = get_events_by_creator_roles(("staff",))
+    events = get_events_by_creator_roles(("staff", "admin"))
     return render_template("pending_events.html", events=events)
 
 @app.route("/events/mine")
 @role_required("staff")
 def my_events():
-    events = get_events_by_creator_roles(("staff",))
+    events = get_events_by_creator_roles(("staff", "admin"))
     return render_template("my_events.html", events=events)
 
 
@@ -744,31 +751,23 @@ ACCOUNT_EDIT_COOLDOWN_DAYS = 30
 def account_settings():
     user = current_user()
 
-    # Self-service edits are capped to once every 30 days, so the form
-    # can't be used to flip an email or password back and forth
-    # repeatedly. This only governs this self-edit page — an Admin
-    # editing someone else's account via Manage Accounts is unaffected.
-    on_cooldown = False
-    next_eligible = None
-    if user["last_profile_update"]:
-        next_eligible = datetime.fromisoformat(user["last_profile_update"]) + \
+    # Only students have a cooldown, and it applies only to their name.
+    # Email and password changes remain available at any time for every role.
+    on_name_cooldown = False
+    next_name_eligible = None
+    if user["role"] == "student" and user["last_name_change"]:
+        next_name_eligible = datetime.fromisoformat(user["last_name_change"]) + \
             timedelta(days=ACCOUNT_EDIT_COOLDOWN_DAYS)
-        on_cooldown = datetime.utcnow() < next_eligible
+        on_name_cooldown = datetime.utcnow() < next_name_eligible
 
     if request.method == "POST":
-        # Checked first and server-side — this isn't just a disabled
-        # form in the browser, so it can't be bypassed by replaying the
-        # request directly.
-        if on_cooldown:
-            flash(
-                f"You can next update your account on "
-                f"{next_eligible.strftime('%B %d, %Y')}.",
-                "error",
-            )
-            return render_template("account_settings.html", form=user,
-                                   on_cooldown=on_cooldown, next_eligible=next_eligible)
-
-        name = request.form.get("name", "").strip()
+        requested_name = request.form.get("name", user["name"]).strip()
+        name_change_blocked = (
+            on_name_cooldown and requested_name != user["name"]
+        )
+        # Enforce the student name cooldown on the server, while allowing
+        # email/password changes in the same request to continue.
+        name = user["name"] if name_change_blocked else requested_name
         email = request.form.get("email", "").strip().lower()
         current_password = request.form.get("current_password", "")
         new_password = request.form.get("new_password", "")
@@ -791,27 +790,46 @@ def account_settings():
             for e in errors:
                 flash(e, "error")
             return render_template("account_settings.html", form=request.form,
-                                   on_cooldown=on_cooldown, next_eligible=next_eligible)
+                                   on_name_cooldown=on_name_cooldown,
+                                   next_name_eligible=next_name_eligible)
 
         if not update_own_profile(user["id"], name, email):
             flash("That email is already used by another account.", "error")
             return render_template("account_settings.html", form=request.form,
-                                   on_cooldown=on_cooldown, next_eligible=next_eligible)
+                                   on_name_cooldown=on_name_cooldown,
+                                   next_name_eligible=next_name_eligible)
 
         if wants_password_change:
             update_password(user["id"], new_password)
 
-        set_last_profile_update(user["id"], datetime.utcnow().isoformat())
+        name_was_changed = name != user["name"]
+        if user["role"] == "student" and name_was_changed:
+            set_last_name_change(user["id"], datetime.utcnow().isoformat())
+            next_name_eligible = datetime.utcnow() + timedelta(days=ACCOUNT_EDIT_COOLDOWN_DAYS)
 
-        flash(
-            "Account updated — your password was also changed." if wants_password_change
-            else "Account updated.",
-            "success",
-        )
+        if name_change_blocked:
+            flash(
+                "Account changes were saved. Your name was left unchanged; you can "
+                f"change it again on {next_name_eligible.strftime('%B %d, %Y')}.",
+                "success",
+            )
+        elif user["role"] == "student" and name_was_changed:
+            flash(
+                "Account updated. You can change your name again on "
+                f"{next_name_eligible.strftime('%B %d, %Y')}.",
+                "success",
+            )
+        else:
+            flash(
+                "Account updated — your password was also changed." if wants_password_change
+                else "Account updated.",
+                "success",
+            )
         return redirect(url_for("account_settings"))
 
     return render_template("account_settings.html", form=user,
-                           on_cooldown=on_cooldown, next_eligible=next_eligible)
+                           on_name_cooldown=on_name_cooldown,
+                           next_name_eligible=next_name_eligible)
 
 
 # ---------------------------------------------------------------------------

@@ -1,5 +1,6 @@
 import os
 import sqlite3
+from abc import ABC, abstractmethod
 
 import psycopg
 from psycopg.rows import dict_row
@@ -41,37 +42,114 @@ def _translate_qmark_placeholders(sql):
     return "".join(output)
 
 
-class DatabaseConnection:
-    """Expose a consistent execute/commit API for SQLite and psycopg."""
+class DatabaseConnection(ABC):
+    """Common interface inherited by the SQLite and PostgreSQL adapters."""
 
-    def __init__(self, raw, is_postgres):
+    def __init__(self, raw):
         self.raw = raw
-        self.is_postgres = is_postgres
+
+    @property
+    @abstractmethod
+    def is_postgres(self):
+        """Identify the database type for existing application code."""
+
+    @property
+    @abstractmethod
+    def IntegrityError(self):
+        """Return the integrity-error class for this database driver."""
+
+    @property
+    @abstractmethod
+    def Error(self):
+        """Return the general error class for this database driver."""
+
+    @abstractmethod
+    def execute(self, sql, params=()):
+        """Run one parameterized SQL statement."""
+
+    @abstractmethod
+    def executemany(self, sql, params):
+        """Run one parameterized SQL statement for multiple rows."""
+
+    @abstractmethod
+    def begin_serialized(self, lock_id):
+        """Start a transaction protected from concurrent schema setup."""
+
+    @abstractmethod
+    def table_columns(self, table):
+        """Return the names of columns in a table."""
+
+    def __getattr__(self, name):
+        # Keep the rest of each driver's connection API available, including
+        # commit(), rollback(), close(), and SQLite's executescript().
+        return getattr(self.raw, name)
+
+
+class SQLiteDatabaseConnection(DatabaseConnection):
+    """SQLite implementation of the shared database connection interface."""
+
+    @property
+    def is_postgres(self):
+        return False
 
     @property
     def IntegrityError(self):
-        return psycopg.IntegrityError if self.is_postgres else sqlite3.IntegrityError
+        return sqlite3.IntegrityError
 
     @property
     def Error(self):
-        return psycopg.Error if self.is_postgres else sqlite3.Error
+        return sqlite3.Error
 
     def execute(self, sql, params=()):
-        if self.is_postgres:
-            sql = _translate_qmark_placeholders(sql)
         return self.raw.execute(sql, params)
 
     def executemany(self, sql, params):
-        if self.is_postgres:
-            sql = _translate_qmark_placeholders(sql)
-            # psycopg 3 exposes executemany on cursors, not connections.
-            cursor = self.raw.cursor()
-            cursor.executemany(sql, params)
-            return cursor
         return self.raw.executemany(sql, params)
 
-    def __getattr__(self, name):
-        return getattr(self.raw, name)
+    def begin_serialized(self, lock_id):
+        self.execute("BEGIN IMMEDIATE")
+
+    def table_columns(self, table):
+        rows = self.execute(f"PRAGMA table_info({table})").fetchall()
+        return {row["name"] for row in rows}
+
+
+class PostgresDatabaseConnection(DatabaseConnection):
+    """PostgreSQL implementation of the shared database connection interface."""
+
+    @property
+    def is_postgres(self):
+        return True
+
+    @property
+    def IntegrityError(self):
+        return psycopg.IntegrityError
+
+    @property
+    def Error(self):
+        return psycopg.Error
+
+    def execute(self, sql, params=()):
+        sql = _translate_qmark_placeholders(sql)
+        return self.raw.execute(sql, params)
+
+    def executemany(self, sql, params):
+        sql = _translate_qmark_placeholders(sql)
+        # psycopg 3 exposes executemany on cursors, not connections.
+        cursor = self.raw.cursor()
+        cursor.executemany(sql, params)
+        return cursor
+
+    def begin_serialized(self, lock_id):
+        self.execute("SELECT pg_advisory_xact_lock(?)", (lock_id,))
+
+    def table_columns(self, table):
+        rows = self.execute(
+            """SELECT column_name AS name FROM information_schema.columns
+               WHERE table_schema = current_schema() AND table_name = ?""",
+            (table,),
+        ).fetchall()
+        return {row["name"] for row in rows}
 
 
 def _connect():
@@ -81,7 +159,7 @@ def _connect():
         if url.startswith("postgres://"):
             url = "postgresql://" + url[len("postgres://"):]
         raw = psycopg.connect(url, row_factory=dict_row, connect_timeout=15)
-        return DatabaseConnection(raw, True)
+        return PostgresDatabaseConnection(raw)
 
     parent = os.path.dirname(os.path.abspath(DATABASE_PATH))
     os.makedirs(parent, exist_ok=True)
@@ -89,7 +167,7 @@ def _connect():
     raw.row_factory = sqlite3.Row
     raw.execute("PRAGMA foreign_keys = ON")
     raw.execute("PRAGMA busy_timeout = 30000")
-    return DatabaseConnection(raw, False)
+    return SQLiteDatabaseConnection(raw)
 
 
 def get_db():
@@ -108,23 +186,12 @@ def close_db(e=None):
 
 def begin_serialized(db, lock_id=734128):
     """Start a transaction serialized against other startup/recovery workers."""
-    if db.is_postgres:
-        db.execute("SELECT pg_advisory_xact_lock(?)", (lock_id,))
-    else:
-        db.execute("BEGIN IMMEDIATE")
+    db.begin_serialized(lock_id)
 
 
 def table_columns(conn, table):
     """Return a table's column names on either supported database."""
-    if conn.is_postgres:
-        rows = conn.execute(
-            """SELECT column_name AS name FROM information_schema.columns
-               WHERE table_schema = current_schema() AND table_name = ?""",
-            (table,),
-        ).fetchall()
-    else:
-        rows = conn.execute(f"PRAGMA table_info({table})").fetchall()
-    return {row["name"] for row in rows}
+    return conn.table_columns(table)
 
 
 def init_db():
@@ -195,6 +262,7 @@ def _ensure_postgres_schema(conn):
                created_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP::text),
                is_active INTEGER NOT NULL DEFAULT 1,
                last_profile_update TEXT,
+               last_name_change TEXT,
                must_change_password INTEGER NOT NULL DEFAULT 0,
                session_version INTEGER NOT NULL DEFAULT 0
            )""",
@@ -253,6 +321,7 @@ def _ensure_postgres_schema(conn):
         conn.execute(statement)
     conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS is_active INTEGER NOT NULL DEFAULT 1")
     conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS last_profile_update TEXT")
+    conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS last_name_change TEXT")
     conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS must_change_password INTEGER NOT NULL DEFAULT 0")
     conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS session_version INTEGER NOT NULL DEFAULT 0")
 
@@ -316,6 +385,7 @@ def ensure_schema_migrations():
             migrations = {
                 "is_active": "INTEGER NOT NULL DEFAULT 1",
                 "last_profile_update": "TEXT",
+                "last_name_change": "TEXT",
                 "must_change_password": "INTEGER NOT NULL DEFAULT 0",
                 "session_version": "INTEGER NOT NULL DEFAULT 0",
             }
