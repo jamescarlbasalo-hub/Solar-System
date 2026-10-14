@@ -1,12 +1,3 @@
-"""One-time, non-destructive copy of SchoolSync data from SQLite to PostgreSQL.
-
-Run locally and paste the Render Postgres EXTERNAL URL at the hidden prompt:
-    python migrate_sqlite_to_postgres.py schoolsync-backup-YYYYMMDD.db
-
-The script refuses to run unless the PostgreSQL destination is empty. It does
-not delete or modify the SQLite source file.
-"""
-
 import argparse
 from getpass import getpass
 import os

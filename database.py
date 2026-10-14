@@ -1,10 +1,3 @@
-"""Database access for SchoolSync.
-
-Local development uses SQLite by default. Set DATABASE_URL to a PostgreSQL
-connection URL (Render's Internal URL in the web service) to use PostgreSQL.
-The small connection adapter keeps the app's existing qmark SQL portable.
-"""
-
 import os
 import sqlite3
 

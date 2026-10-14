@@ -1,13 +1,4 @@
-"""
-events.py
----------
-Functions for reading and writing the `events` table, plus two small
-"who's allowed to see/edit this" helpers that centralize the approval
-and permission rules in one place, so every route follows the same
-logic instead of each route re-implementing it slightly differently.
-"""
-
-from datetime import date as date_cls
+from datetime import date as date_cls, datetime
 from database import get_db
 
 VALID_STATUSES = ("Pending", "Approved", "Rejected")
@@ -106,7 +97,7 @@ def get_upcoming_approved_events(limit=5):
     db = get_db()
     today_str = date_cls.today().isoformat()
     rows = db.execute(
-        """SELECT * FROM events WHERE status = 'Approved' AND date >= ?
+        """SELECT * FROM events WHERE status = 'Approved' AND date > ?
            ORDER BY date, start_time LIMIT ?""",
         (today_str, limit),
     ).fetchall()
@@ -174,7 +165,15 @@ def event_time_display(event):
     special case here instead of letting every template re-check for it."""
     if event["start_time"] == "TBA" or event["end_time"] == "TBA":
         return "Time to be announced"
-    return f"{event['start_time']} – {event['end_time']}"
+
+    def format_time(value):
+        try:
+            parsed = datetime.strptime(value, "%H:%M")
+        except (TypeError, ValueError):
+            return value
+        return parsed.strftime("%I:%M %p").lstrip("0")
+
+    return f"{format_time(event['start_time'])} – {format_time(event['end_time'])}"
 
 
 # ---------------------------------------------------------------------------
