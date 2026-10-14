@@ -458,14 +458,9 @@ def edit_event(event_id):
             return render_template("event_form.html", form=request.form, mode="edit", event_id=event_id)
 
         update_event(event_id, title, date_str, start_time, end_time, location, description)
-
-        # If Staff edits a Rejected event, send it back to Pending so an
-        # Admin reviews the corrected version.
-        if user["role"] == "staff" and event["status"] == "Rejected":
-            set_event_status(event_id, "Pending")
-            flash("Event updated and resubmitted for approval.", "success")
-        else:
-            flash("Event updated.", "success")
+        # Editing event details does not change its review status. A rejected
+        # event stays rejected until someone explicitly approves it.
+        flash("Event updated.", "success")
 
         return redirect(url_for("event_detail", event_id=event_id))
 
