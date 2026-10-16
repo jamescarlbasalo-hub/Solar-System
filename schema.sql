@@ -8,6 +8,7 @@ CREATE TABLE users (
     email         TEXT NOT NULL UNIQUE,
     password_hash TEXT NOT NULL,
     role          TEXT NOT NULL CHECK (role IN ('admin', 'staff', 'student')),
+    deleted_at    TEXT,
     last_name_change TEXT,
     created_at    TEXT NOT NULL DEFAULT (datetime('now'))
 );

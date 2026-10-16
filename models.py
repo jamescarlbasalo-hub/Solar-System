@@ -43,28 +43,103 @@ def get_user_by_id(user_id):
     return row
 
 
-def get_all_users(role=None):
-    """All users, optionally filtered to one role (e.g. just 'student')."""
+def get_all_users(role=None, include_deleted=False):
+    """All non-deleted users, optionally filtered to one role.
+
+    Soft-deleted staff are available separately for the admin archive.
+    """
     db = get_db()
+    conditions = []
+    params = []
+    if not include_deleted:
+        conditions.append("deleted_at IS NULL")
     if role:
-        rows = db.execute(
-            "SELECT * FROM users WHERE role = ? ORDER BY name", (role,)
-        ).fetchall()
-    else:
-        rows = db.execute("SELECT * FROM users ORDER BY role, name").fetchall()
-    return rows
+        conditions.append("role = ?")
+        params.append(role)
+    where = f" WHERE {' AND '.join(conditions)}" if conditions else ""
+    return db.execute(
+        f"SELECT * FROM users{where} ORDER BY role, name", params
+    ).fetchall()
+
+
+def get_deleted_staff():
+    """Return soft-deleted staff for the admin's read-only archive."""
+    db = get_db()
+    return db.execute(
+        "SELECT * FROM users WHERE role = 'staff' AND deleted_at IS NOT NULL "
+        "ORDER BY deleted_at DESC, name"
+    ).fetchall()
 
 
 def count_users_by_role(role):
     db = get_db()
-    row = db.execute("SELECT COUNT(*) AS total FROM users WHERE role = ?", (role,)).fetchone()
+    row = db.execute(
+        "SELECT COUNT(*) AS total FROM users WHERE role = ? AND deleted_at IS NULL",
+        (role,),
+    ).fetchone()
     return row["total"]
 
 
-def delete_user(user_id):
+def soft_delete_staff(admin_id, staff_id):
+    """Soft-delete one staff account and audit it in one transaction.
+
+    Keeps the users row and all event relationships intact, revokes active
+    sessions by incrementing session_version, and prevents repeat deletion.
+    Returns one of: deleted, already_deleted, not_found, not_staff, conflict.
+    Database errors are rolled back and re-raised for the route to handle.
+    """
     db = get_db()
-    db.execute("DELETE FROM users WHERE id = ?", (user_id,))
-    db.commit()
+    now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    try:
+        cursor = db.execute(
+            """UPDATE users
+                  SET is_active = 0,
+                      deleted_at = ?,
+                      session_version = session_version + 1
+                WHERE id = ? AND role = 'staff' AND deleted_at IS NULL""",
+            (now, staff_id),
+        )
+        if cursor.rowcount != 1:
+            target = db.execute(
+                "SELECT role, deleted_at FROM users WHERE id = ?", (staff_id,)
+            ).fetchone()
+            db.rollback()
+            if target is None:
+                return "not_found"
+            if target["role"] != "staff":
+                return "not_staff"
+            if target["deleted_at"] is not None:
+                return "already_deleted"
+            return "conflict"
+
+        db.execute(
+            """INSERT INTO audit_log
+                   (admin_id, target_user_id, action, status, created_at)
+               VALUES (?, ?, ?, ?, ?)""",
+            (admin_id, staff_id, "staff_soft_deleted", "success", now),
+        )
+        db.commit()
+        return "deleted"
+    except database.DATABASE_ERRORS:
+        db.rollback()
+        raise
+
+
+def delete_user(user_id):
+    """Delete an account when nothing references it.
+
+    Returns False when foreign-key history (such as submitted events or
+    audit records) prevents deletion, leaving the caller to deactivate it
+    instead so related records remain intact.
+    """
+    db = get_db()
+    try:
+        db.execute("DELETE FROM users WHERE id = ?", (user_id,))
+        db.commit()
+        return True
+    except database.INTEGRITY_ERRORS:
+        db.rollback()
+        return False
 
 
 def update_user_account(user_id, name, email, role):
@@ -89,8 +164,15 @@ def set_user_active(user_id, is_active):
     row and event history stay intact, they just can't log in while
     is_active is 0."""
     db = get_db()
-    db.execute("UPDATE users SET is_active = ? WHERE id = ?", (1 if is_active else 0, user_id))
+    if is_active:
+        cursor = db.execute(
+            "UPDATE users SET is_active = 1 WHERE id = ? AND deleted_at IS NULL",
+            (user_id,),
+        )
+    else:
+        cursor = db.execute("UPDATE users SET is_active = 0 WHERE id = ?", (user_id,))
     db.commit()
+    return cursor.rowcount == 1
 
 
 def update_own_profile(user_id, name, email):

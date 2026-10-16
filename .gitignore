@@ -7,3 +7,4 @@ schoolsync.db
 
 *.db-*
 schoolsync-backup-*.db
+tests/.staff-soft-delete-test.db

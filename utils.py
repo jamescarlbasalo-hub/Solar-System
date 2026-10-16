@@ -52,7 +52,7 @@ def current_user():
         # only blocking future logins. session.clear() ends that session
         # immediately; login_required/role_required will then redirect
         # them to the login page like anyone else who isn't logged in.
-        if user is not None and not user["is_active"]:
+        if user is not None and (not user["is_active"] or user["deleted_at"] is not None):
             session.clear()
             user = None
         # Same idea for password resets: an Admin reset bumps the user's

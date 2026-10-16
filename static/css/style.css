@@ -855,6 +855,63 @@ input:-webkit-autofill,input:-webkit-autofill:hover,input:-webkit-autofill:focus
   .sidebar-utility:focus-visible { outline:2px solid #a77aff; outline-offset:2px; }
 }
 
+/* Manage Accounts desktop layout: give the account table the full content
+   width so its columns and actions are visible without sideways scrolling. */
+@media (min-width:761px) {
+  .manage-accounts-layout {
+    grid-template-columns:minmax(0,1fr);
+    gap:18px;
+  }
+  .manage-accounts-layout > .manage-account-form-card,
+  .manage-accounts-layout > .list-card {
+    width:100%;
+    max-width:none;
+    min-width:0;
+    padding:22px 24px;
+  }
+  .manage-account-form {
+    display:grid;
+    grid-template-columns:repeat(4,minmax(0,1fr)) auto;
+    align-items:end;
+    gap:0 14px;
+  }
+  .manage-account-field { min-width:0; }
+  .manage-account-field label { display:block; margin:0 0 7px; }
+  .manage-account-field > input,
+  .manage-account-field > select { margin-bottom:0; }
+  .manage-account-field .password-field { margin-bottom:0; }
+  .manage-account-submit { display:flex; align-items:end; }
+  .manage-account-submit .btn { min-height:48px; white-space:nowrap; }
+
+  .manage-accounts-layout .data-table {
+    width:100%;
+    min-width:0;
+    table-layout:fixed;
+  }
+  .manage-accounts-layout .data-table th,
+  .manage-accounts-layout .data-table td { padding:12px 10px; }
+  .manage-accounts-layout .data-table th:nth-child(1) { width:14%; }
+  .manage-accounts-layout .data-table th:nth-child(2) { width:22%; }
+  .manage-accounts-layout .data-table th:nth-child(3) { width:8%; }
+  .manage-accounts-layout .data-table th:nth-child(4) { width:19%; }
+  .manage-accounts-layout .data-table th:nth-child(5) { width:10%; }
+  .manage-accounts-layout .data-table th:nth-child(6) { width:27%; }
+  .manage-accounts-layout .manage-account-name,
+  .manage-accounts-layout .manage-account-email { overflow-wrap:anywhere; }
+  .manage-accounts-layout .data-table td:nth-child(5) { white-space:nowrap; }
+  .manage-accounts-layout .row-actions { gap:5px; }
+  .manage-accounts-layout .row-actions .btn { padding:6px 8px; font-size:10px; white-space:nowrap; }
+
+  .manage-accounts-archive .table-wrap { min-width:0; }
+  .manage-accounts-archive .data-table { min-width:0; table-layout:fixed; }
+  .manage-accounts-archive .data-table th:nth-child(1) { width:24%; }
+  .manage-accounts-archive .data-table th:nth-child(2) { width:38%; }
+  .manage-accounts-archive .data-table th:nth-child(3) { width:18%; }
+  .manage-accounts-archive .data-table th:nth-child(4) { width:20%; }
+  .manage-accounts-archive .data-table td:nth-child(2) { overflow-wrap:anywhere; }
+  .manage-accounts-archive .data-table td:nth-child(4) { white-space:nowrap; }
+}
+
 /* Dark reset-password surfaces: keep text readable in the modal and result page. */
 .reset-options .reset-option {
   color: #f5f1fa;

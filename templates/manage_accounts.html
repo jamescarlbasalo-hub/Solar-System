@@ -7,46 +7,56 @@
   <p class="page-sub">Every account in the system — students self-signed-up, or added here.</p>
 </header>
 
-<section class="two-col">
-  <div class="form-card">
+<section class="two-col manage-accounts-layout">
+  <div class="form-card manage-account-form-card">
     <h2>Add a Staff or Admin account</h2>
     <p class="hint-text">Students sign themselves up — this form is for accounts that need Staff or Admin access.</p>
-    <form method="POST" action="{{ url_for('manage_accounts') }}">
-      <label for="name">Full name</label>
-      <input type="text" id="name" name="name" placeholder="e.g. Mr. Santos" required>
-
-      <label for="email">Email</label>
-      <input type="email" id="email" name="email" placeholder="e.g. santos@schoolsync.edu" required>
-
-      <label for="password">Password</label>
-      <div class="password-field">
-        <input type="password" id="password" name="password" placeholder="Minimum 6 characters" minlength="6" autocomplete="new-password" required>
-        <button type="button" class="password-toggle" aria-label="Show password">
-          <svg class="icon-eye" style="display:none" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
-          <svg class="icon-eye-off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
-        </button>
+    <form method="POST" action="{{ url_for('manage_accounts') }}" class="manage-account-form">
+      <div class="manage-account-field">
+        <label for="name">Full name</label>
+        <input type="text" id="name" name="name" placeholder="e.g. Mr. Santos" required>
       </div>
 
-      <label for="role">Role</label>
-      <select id="role" name="role" required>
-        <option value="staff">Staff</option>
-        <option value="admin">Admin</option>
-        <option value="student">Student</option>
-      </select>
+      <div class="manage-account-field">
+        <label for="email">Email</label>
+        <input type="email" id="email" name="email" placeholder="e.g. santos@schoolsync.edu" required>
+      </div>
 
-      <button type="submit" class="btn btn-primary">Create account</button>
+      <div class="manage-account-field">
+        <label for="password">Password</label>
+        <div class="password-field">
+          <input type="password" id="password" name="password" placeholder="Minimum 6 characters" minlength="6" autocomplete="new-password" required>
+          <button type="button" class="password-toggle" aria-label="Show password">
+            <svg class="icon-eye" style="display:none" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+            <svg class="icon-eye-off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+          </button>
+        </div>
+      </div>
+
+      <div class="manage-account-field">
+        <label for="role">Role</label>
+        <select id="role" name="role" required>
+          <option value="staff">Staff</option>
+          <option value="admin">Admin</option>
+          <option value="student">Student</option>
+        </select>
+      </div>
+
+      <div class="manage-account-submit">
+        <button type="submit" class="btn btn-primary">Create account</button>
+      </div>
     </form>
   </div>
 
   <div class="list-card">
     <h2>All accounts ({{ users|length }})</h2>
     <table class="data-table">
-      <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Status</th><th>Joined</th><th></th></tr></thead>
+      <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Status</th><th>Joined</th><th>Actions</th></tr></thead>
       <tbody>
       {% for u in users %}
         <tr class="{{ 'row-inactive' if not u.is_active else '' }}">
-          <td>{{ u.name }}</td>
-          <td>{{ u.email }}</td>
+          <td class="manage-account-name">{{ u.name }}</td>
+          <td class="manage-account-email">{{ u.email }}</td>
           <td><span class="role-badge role-{{ u.role }}">{{ u.role | capitalize }}</span></td>
           <td>
             {% if u.is_active %}
@@ -77,9 +87,17 @@
                   <button type="submit" class="btn btn-small btn-good">Reactivate</button>
                 {% endif %}
               </form>
-              <form method="POST" action="{{ url_for('delete_account', user_id=u.id) }}" onsubmit="return confirm('Delete {{ u.email }}?');">
-                <button type="submit" class="btn btn-small btn-ghost-danger">Delete</button>
-              </form>
+              {% if u.role == 'staff' %}
+                <form method="POST" action="{{ url_for('delete_account', user_id=u.id) }}"
+                      onsubmit="if (!confirm('Delete this staff account? They will lose access, but their events and history will remain unchanged.')) return false; const button = this.querySelector('button[type=submit]'); button.disabled = true; button.textContent = 'Deleting…'; return true;">
+                  <button type="submit" class="btn btn-small btn-ghost-danger">Delete</button>
+                </form>
+              {% elif u.role == 'student' %}
+                <form method="POST" action="{{ url_for('delete_account', user_id=u.id) }}"
+                      onsubmit="if (!confirm('Delete {{ u.email }}?')) return false; const button = this.querySelector('button[type=submit]'); button.disabled = true; button.textContent = 'Deleting…'; return true;">
+                  <button type="submit" class="btn btn-small btn-ghost-danger">Delete</button>
+                </form>
+              {% endif %}
             {% else %}
               <span class="hint-text">(you)</span>
             {% endif %}
@@ -90,6 +108,28 @@
     </table>
   </div>
 </section>
+
+{% if deleted_staff %}
+<section class="recent-section manage-accounts-archive" style="margin-top: 18px;">
+  <h2>Deleted staff accounts ({{ deleted_staff|length }})</h2>
+  <p class="hint-text">These accounts can no longer sign in. Their submitted events and history are preserved.</p>
+  <div class="table-wrap">
+    <table class="data-table">
+      <thead><tr><th>Name</th><th>Email</th><th>Status</th><th>Deleted</th></tr></thead>
+      <tbody>
+      {% for u in deleted_staff %}
+        <tr class="row-inactive">
+          <td>{{ u.name }}</td>
+          <td>{{ u.email }}</td>
+          <td><span class="status-pill status-rejected">Deleted</span></td>
+          <td>{{ u.deleted_at[:10] if u.deleted_at else '—' }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endif %}
 
 {% endblock %}
 
