@@ -42,11 +42,7 @@ with sqlite3.connect(_DB_PATH) as _legacy_db:
 import database
 from app import app
 from events import create_event, school_today
-from models import (
-    create_user,
-    get_user_by_id,
-    soft_delete_staff,
-)
+from models import create_user, delete_user, get_user_by_id
 from werkzeug.security import check_password_hash
 
 
@@ -112,39 +108,28 @@ class StaffSoftDeleteTests(unittest.TestCase):
         self.assertIsNone(legacy["deleted_at"])
         self.assertEqual(legacy["is_active"], 1)
 
-    def test_admin_soft_deletes_staff_and_preserves_each_event_status(self):
+    def test_admin_permanently_deletes_staff_and_preserves_creator_and_event_history(self):
         event_date = (school_today() + timedelta(days=10)).isoformat()
         expected = {"Approved Event": "Approved", "Pending Event": "Pending", "Rejected Event": "Rejected"}
         with app.app_context():
             for title, status in expected.items():
                 create_event(title, event_date, "09:00", "10:00", "Hall", "Details", self.staff_id, status)
-            session_version = get_user_by_id(self.staff_id)["session_version"]
-
         response = self._delete(self._client_as(self.admin_id), self.staff_id)
         self.assertEqual(response.status_code, 200)
-        self.assertIn(b"events and history were preserved", response.data)
+        self.assertIn(b"permanently deleted", response.data)
 
         with app.app_context():
             staff = get_user_by_id(self.staff_id)
             rows = database.get_db().execute(
-                "SELECT title, status, created_by FROM events WHERE created_by = ? ORDER BY title",
-                (self.staff_id,),
-            ).fetchall()
-            audit = database.get_db().execute(
-                "SELECT admin_id, target_user_id, action, status FROM audit_log "
-                "WHERE target_user_id = ? AND action = 'staff_soft_deleted'",
-                (self.staff_id,),
+                "SELECT title, status, created_by, created_by_name, created_by_role "
+                "FROM events WHERE created_by_name = ? ORDER BY title",
+                ("Test Staff",),
             ).fetchall()
 
-        self.assertIsNotNone(staff)
-        self.assertEqual(staff["is_active"], 0)
-        self.assertIsNotNone(staff["deleted_at"])
-        self.assertEqual(staff["session_version"], session_version + 1)
+        self.assertIsNone(staff)
         self.assertEqual({row["title"]: row["status"] for row in rows}, expected)
-        self.assertTrue(all(row["created_by"] == self.staff_id for row in rows))
-        self.assertEqual(len(audit), 1)
-        self.assertEqual(audit[0]["admin_id"], self.admin_id)
-        self.assertEqual(audit[0]["status"], "success")
+        self.assertTrue(all(row["created_by"] is None for row in rows))
+        self.assertTrue(all(row["created_by_role"] == "staff" for row in rows))
 
     def test_deleted_staff_cannot_log_in_and_old_session_is_revoked(self):
         with app.app_context():
@@ -167,7 +152,7 @@ class StaffSoftDeleteTests(unittest.TestCase):
             data={"email": staff["email"], "password": "staff-secret", "csrf_token": csrf},
         )
         self.assertEqual(login.status_code, 200)
-        self.assertIn(b"deactivated", login.data)
+        self.assertIn(b"Invalid email or password", login.data)
         self.assertTrue(check_password_hash(password_hash, "staff-secret"))
 
     def test_admin_can_review_pending_and_students_still_see_approved_event(self):
@@ -184,40 +169,24 @@ class StaffSoftDeleteTests(unittest.TestCase):
         self.assertEqual(student_page.status_code, 200)
         self.assertIn(b"Visible Approved", student_page.data)
 
-    def test_deleted_staff_is_archived_and_cannot_be_reactivated_or_edited(self):
+    def test_deleted_staff_is_removed_from_accounts_and_archive(self):
         admin = self._client_as(self.admin_id)
         self._delete(admin, self.staff_id)
         listing = admin.get("/admin/accounts")
         html = listing.data.decode("utf-8")
-        active_list = html.split('<div class="list-card">', 1)[-1].split("</section>", 1)[0]
-        archive = html.split("Deleted staff accounts", 1)[-1]
-        self.assertIn("Test Staff", archive)
-        self.assertNotIn("Test Staff", active_list)
-
-        for endpoint in ("toggle-active", "edit"):
-            response = admin.post(
-                f"/admin/accounts/{self.staff_id}/{endpoint}",
-                data={"csrf_token": "test-csrf-token"},
-                follow_redirects=True,
-            )
-            self.assertEqual(response.status_code, 200)
+        self.assertNotIn("Deleted staff accounts", html)
+        self.assertNotIn("Test Staff", html)
+        self.assertIn("permanently deleted", html)
         with app.app_context():
-            staff = get_user_by_id(self.staff_id)
-        self.assertEqual(staff["is_active"], 0)
-        self.assertIsNotNone(staff["deleted_at"])
+            self.assertIsNone(get_user_by_id(self.staff_id))
 
-    def test_repeat_delete_is_safe_and_does_not_duplicate_audit(self):
+    def test_repeat_delete_reports_missing_account_without_side_effects(self):
         admin = self._client_as(self.admin_id)
         self._delete(admin, self.staff_id)
         response = self._delete(admin, self.staff_id)
-        self.assertIn(b"already been deleted", response.data)
+        self.assertIn(b"no longer exists", response.data)
         with app.app_context():
-            count = database.get_db().execute(
-                "SELECT COUNT(*) AS total FROM audit_log "
-                "WHERE target_user_id = ? AND action = 'staff_soft_deleted'",
-                (self.staff_id,),
-            ).fetchone()["total"]
-        self.assertEqual(count, 1)
+            self.assertIsNone(get_user_by_id(self.staff_id))
 
     def test_non_admin_and_non_staff_targets_are_rejected(self):
         staff_response = self._delete(self._client_as(self.other_staff_id), self.staff_id)
@@ -230,22 +199,25 @@ class StaffSoftDeleteTests(unittest.TestCase):
             self.assertEqual(get_user_by_id(self.staff_id)["is_active"], 1)
             self.assertEqual(get_user_by_id(self.other_admin_id)["is_active"], 1)
 
-    def test_audit_insert_error_rolls_back_account_change(self):
+    def test_delete_error_rolls_back_account_and_event_reference_changes(self):
         with app.app_context():
             db = database.get_db()
+            create_event("Still Linked", (school_today() + timedelta(days=2)).isoformat(),
+                         "09:00", "10:00", "Hall", "", self.staff_id, "Approved")
             db.execute(
-                """CREATE TRIGGER fail_soft_delete_audit BEFORE INSERT ON audit_log
-                   WHEN NEW.action = 'staff_soft_deleted'
-                   BEGIN SELECT RAISE(ABORT, 'simulated audit failure'); END"""
+                """CREATE TRIGGER fail_account_delete BEFORE DELETE ON users
+                   WHEN OLD.id = %d
+                   BEGIN SELECT RAISE(ABORT, 'simulated delete failure'); END""" % self.staff_id
             )
             db.commit()
             with self.assertRaises(database.sqlite3.IntegrityError):
-                soft_delete_staff(self.admin_id, self.staff_id)
+                delete_user(self.staff_id)
             staff = get_user_by_id(self.staff_id)
-            db.execute("DROP TRIGGER fail_soft_delete_audit")
+            event = db.execute("SELECT created_by FROM events WHERE title = 'Still Linked'").fetchone()
+            db.execute("DROP TRIGGER fail_account_delete")
             db.commit()
-        self.assertEqual(staff["is_active"], 1)
-        self.assertIsNone(staff["deleted_at"])
+        self.assertIsNotNone(staff)
+        self.assertEqual(event["created_by"], self.staff_id)
 
 
 if __name__ == "__main__":

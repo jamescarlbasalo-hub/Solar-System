@@ -12,7 +12,7 @@ from werkzeug.security import generate_password_hash
 import database
 from models import (
     get_user_by_email, get_user_by_id, verify_password, count_users_by_role,
-    create_user, get_all_users, get_deleted_staff, delete_user, soft_delete_staff,
+    create_user, get_all_users, delete_user,
     update_user_account, set_user_active, update_own_profile, update_password,
     set_last_name_change, admin_reset_password, complete_forced_password_change,
 )
@@ -557,8 +557,7 @@ def manage_accounts():
         return redirect(url_for("manage_accounts"))
 
     users = get_all_users()
-    deleted_staff = get_deleted_staff()
-    return render_template("manage_accounts.html", users=users, deleted_staff=deleted_staff)
+    return render_template("manage_accounts.html", users=users)
 
 
 @app.route("/admin/accounts/<int:user_id>/delete", methods=["POST"])
@@ -572,32 +571,21 @@ def delete_account(user_id):
             flash("That account no longer exists.", "error")
         elif target["role"] == "admin":
             flash("Admin accounts can't be deleted from Manage Accounts.", "error")
-        elif target["role"] == "staff":
-            try:
-                result = soft_delete_staff(current_user()["id"], user_id)
-            except database.DATABASE_ERRORS:
-                app.logger.exception("Staff soft deletion failed for user id %s", user_id)
-                flash("The staff account was not deleted. Please try again.", "error")
-            else:
-                messages = {
-                    "deleted": ("success", f"Staff account '{target['email']}' was deleted. "
-                                "Their access was revoked and their events and history were preserved."),
-                    "already_deleted": ("error", "That staff account has already been deleted."),
-                    "not_found": ("error", "That account no longer exists."),
-                    "not_staff": ("error", "Only staff accounts can be deleted this way."),
-                    "conflict": ("error", "The account changed while being deleted. Refresh and try again."),
-                }
-                category, message = messages[result]
-                flash(message, category)
-        elif delete_user(user_id):
-            flash(f"Account '{target['email']}' deleted.", "success")
         else:
-            set_user_active(user_id, False)
-            flash(
-                f"Account '{target['email']}' has linked history, so it was "
-                "deactivated instead of deleted. Its history was preserved.",
-                "success",
-            )
+            try:
+                deleted = delete_user(user_id)
+            except database.DATABASE_ERRORS:
+                app.logger.exception("Permanent account deletion failed for user id %s", user_id)
+                flash("The account was not deleted. Please try again.", "error")
+            else:
+                if deleted:
+                    flash(
+                        f"Account '{target['email']}' was permanently deleted. "
+                        "Its events and announcements were kept with the creator name saved for history.",
+                        "success",
+                    )
+                else:
+                    flash("That account no longer exists.", "error")
     return redirect(url_for("manage_accounts"))
 
 
@@ -608,10 +596,6 @@ def edit_account(user_id):
     if target is None:
         flash("That account doesn't exist.", "error")
         return redirect(url_for("manage_accounts"))
-    if target["deleted_at"] is not None:
-        flash("Deleted staff accounts are archived and can't be edited.", "error")
-        return redirect(url_for("manage_accounts"))
-
     # An admin editing their own account can't change their own role —
     # same reasoning as the self-delete/self-deactivate guards: it's how
     # someone accidentally demotes themselves out of Admin with no way
@@ -656,10 +640,6 @@ def toggle_active(user_id):
     if target is None:
         flash("That account doesn't exist.", "error")
         return redirect(url_for("manage_accounts"))
-    if target["deleted_at"] is not None:
-        flash("Deleted staff accounts can't be reactivated.", "error")
-        return redirect(url_for("manage_accounts"))
-
     # Flip whatever it currently is — active becomes inactive, and vice
     # versa — so one button does both jobs depending on current state.
     new_state = not target["is_active"]
@@ -688,9 +668,6 @@ def reset_account_password(user_id):
     # every rule is re-checked here on the server, never trusted from the form.
     if target is None:
         flash("That account doesn't exist.", "error")
-        return redirect(url_for("manage_accounts"))
-    if target["deleted_at"] is not None:
-        flash("Deleted staff accounts can't have their password reset.", "error")
         return redirect(url_for("manage_accounts"))
     if target["id"] == admin["id"]:
         flash("Use Account Settings to change your own password.", "error")

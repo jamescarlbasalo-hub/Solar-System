@@ -902,14 +902,6 @@ input:-webkit-autofill,input:-webkit-autofill:hover,input:-webkit-autofill:focus
   .manage-accounts-layout .row-actions { gap:5px; }
   .manage-accounts-layout .row-actions .btn { padding:6px 8px; font-size:10px; white-space:nowrap; }
 
-  .manage-accounts-archive .table-wrap { min-width:0; }
-  .manage-accounts-archive .data-table { min-width:0; table-layout:fixed; }
-  .manage-accounts-archive .data-table th:nth-child(1) { width:24%; }
-  .manage-accounts-archive .data-table th:nth-child(2) { width:38%; }
-  .manage-accounts-archive .data-table th:nth-child(3) { width:18%; }
-  .manage-accounts-archive .data-table th:nth-child(4) { width:20%; }
-  .manage-accounts-archive .data-table td:nth-child(2) { overflow-wrap:anywhere; }
-  .manage-accounts-archive .data-table td:nth-child(4) { white-space:nowrap; }
 }
 
 /* Dark reset-password surfaces: keep text readable in the modal and result page. */

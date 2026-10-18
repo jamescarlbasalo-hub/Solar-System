@@ -14,10 +14,16 @@ def school_today():
 # ---------------------------------------------------------------------------
 def create_event(title, date, start_time, end_time, location, description, created_by, status):
     db = get_db()
+    creator = db.execute("SELECT name, role FROM users WHERE id = ?", (created_by,)).fetchone()
+    if creator is None:
+        raise ValueError("Cannot create an event for an account that does not exist.")
     cursor = db.execute(
-        """INSERT INTO events (title, date, start_time, end_time, location, description, created_by, status)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING id""",
-        (title, date, start_time, end_time, location, description, created_by, status),
+        """INSERT INTO events
+               (title, date, start_time, end_time, location, description, created_by,
+                created_by_name, created_by_role, status)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id""",
+        (title, date, start_time, end_time, location, description, created_by,
+         creator["name"], creator["role"], status),
     )
     event_id = cursor.fetchone()["id"]
     db.commit()
@@ -82,10 +88,12 @@ def get_events_by_creator_roles(roles):
     placeholders = ", ".join("?" for _ in roles)
     db = get_db()
     return db.execute(
-        f"""SELECT events.*, users.name AS creator_name, users.role AS creator_role
+        f"""SELECT events.*,
+                   COALESCE(events.created_by_name, users.name) AS creator_name,
+                   COALESCE(events.created_by_role, users.role) AS creator_role
             FROM events
-            JOIN users ON users.id = events.created_by
-            WHERE users.role IN ({placeholders})
+            LEFT JOIN users ON users.id = events.created_by
+            WHERE COALESCE(events.created_by_role, users.role) IN ({placeholders})
             ORDER BY events.date DESC, events.start_time""",
         roles,
     ).fetchall()
@@ -197,10 +205,7 @@ def is_visible(event, user):
     if event["status"] == "Approved":
         return True
     if user["role"] == "staff":
-        creator = get_db().execute(
-            "SELECT role FROM users WHERE id = ?", (event["created_by"],)
-        ).fetchone()
-        return creator is not None and creator["role"] in ("staff", "admin")
+        return _event_creator_role(event) in ("staff", "admin")
     return False
 
 
@@ -210,10 +215,17 @@ def filter_visible(events, user):
 
 def staff_can_manage(event):
     """Staff can manage events created by any staff or admin account."""
+    return _event_creator_role(event) in ("staff", "admin")
+
+
+def _event_creator_role(event):
+    """Read the live role or the saved role for a deleted event creator."""
+    if event["created_by_role"]:
+        return event["created_by_role"]
     creator = get_db().execute(
         "SELECT role FROM users WHERE id = ?", (event["created_by"],)
     ).fetchone()
-    return creator is not None and creator["role"] in ("staff", "admin")
+    return creator["role"] if creator else None
 
 
 def can_edit(event, user):

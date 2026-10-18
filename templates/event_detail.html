@@ -24,7 +24,7 @@
       {% endif %}
     </dd>
     <dt>Location</dt><dd>{{ event.location }}</dd>
-    <dt>Submitted by</dt><dd>{{ creator.name if creator else 'Unknown' }}</dd>
+    <dt>Submitted by</dt><dd>{{ creator.name if creator else (event.created_by_name or 'Unknown') }}</dd>
   </dl>
 
   {% if event.description %}

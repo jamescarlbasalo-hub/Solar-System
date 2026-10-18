@@ -43,10 +43,11 @@ def get_user_by_id(user_id):
     return row
 
 
-def get_all_users(role=None, include_deleted=False):
-    """All non-deleted users, optionally filtered to one role.
+def get_all_users(role=None, include_deleted=True):
+    """All user rows, optionally filtered to one role.
 
-    Soft-deleted staff are available separately for the admin archive.
+    Legacy soft-deleted rows remain visible so an admin can permanently
+    remove them or reactivate them after clearing their old deletion marker.
     """
     db = get_db()
     conditions = []
@@ -62,15 +63,6 @@ def get_all_users(role=None, include_deleted=False):
     ).fetchall()
 
 
-def get_deleted_staff():
-    """Return soft-deleted staff for the admin's read-only archive."""
-    db = get_db()
-    return db.execute(
-        "SELECT * FROM users WHERE role = 'staff' AND deleted_at IS NOT NULL "
-        "ORDER BY deleted_at DESC, name"
-    ).fetchall()
-
-
 def count_users_by_role(role):
     db = get_db()
     row = db.execute(
@@ -80,66 +72,44 @@ def count_users_by_role(role):
     return row["total"]
 
 
-def soft_delete_staff(admin_id, staff_id):
-    """Soft-delete one staff account and audit it in one transaction.
+def delete_user(user_id):
+    """Permanently delete an account while retaining authored content.
 
-    Keeps the users row and all event relationships intact, revokes active
-    sessions by incrementing session_version, and prevents repeat deletion.
-    Returns one of: deleted, already_deleted, not_found, not_staff, conflict.
-    Database errors are rolled back and re-raised for the route to handle.
+    Creator names/roles are snapshotted on events and announcements before
+    unlinking them. One transaction also removes account-specific reset
+    tokens and clears legacy audit references. Database failures are rolled
+    back and re-raised to the route.
     """
     db = get_db()
-    now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    target = db.execute("SELECT id, name, role, email FROM users WHERE id = ?", (user_id,)).fetchone()
+    if target is None:
+        return False
     try:
-        cursor = db.execute(
-            """UPDATE users
-                  SET is_active = 0,
-                      deleted_at = ?,
-                      session_version = session_version + 1
-                WHERE id = ? AND role = 'staff' AND deleted_at IS NULL""",
-            (now, staff_id),
-        )
-        if cursor.rowcount != 1:
-            target = db.execute(
-                "SELECT role, deleted_at FROM users WHERE id = ?", (staff_id,)
-            ).fetchone()
-            db.rollback()
-            if target is None:
-                return "not_found"
-            if target["role"] != "staff":
-                return "not_staff"
-            if target["deleted_at"] is not None:
-                return "already_deleted"
-            return "conflict"
-
         db.execute(
-            """INSERT INTO audit_log
-                   (admin_id, target_user_id, action, status, created_at)
-               VALUES (?, ?, ?, ?, ?)""",
-            (admin_id, staff_id, "staff_soft_deleted", "success", now),
+            """UPDATE events
+                  SET created_by_name = COALESCE(created_by_name, ?),
+                      created_by_role = COALESCE(created_by_role, ?),
+                      created_by = NULL
+                WHERE created_by = ?""",
+            (target["name"], target["role"], user_id),
         )
+        db.execute(
+            """UPDATE announcements
+                  SET posted_by_name = COALESCE(posted_by_name, ?), posted_by = NULL
+                WHERE posted_by = ?""",
+            (target["name"], user_id),
+        )
+        db.execute("DELETE FROM password_resets WHERE user_id = ? OR created_by_admin_id = ?", (user_id, user_id))
+        db.execute("DELETE FROM audit_logs WHERE actor_id = ? OR target_id = ?", (user_id, user_id))
+        db.execute("UPDATE audit_log SET admin_id = NULL WHERE admin_id = ?", (user_id,))
+        db.execute("UPDATE audit_log SET target_user_id = NULL WHERE target_user_id = ?", (user_id,))
+        db.execute("DELETE FROM admin_password_recoveries WHERE lower(admin_email) = lower(?)", (target["email"],))
+        cursor = db.execute("DELETE FROM users WHERE id = ?", (user_id,))
         db.commit()
-        return "deleted"
+        return cursor.rowcount == 1
     except database.DATABASE_ERRORS:
         db.rollback()
         raise
-
-
-def delete_user(user_id):
-    """Delete an account when nothing references it.
-
-    Returns False when foreign-key history (such as submitted events or
-    audit records) prevents deletion, leaving the caller to deactivate it
-    instead so related records remain intact.
-    """
-    db = get_db()
-    try:
-        db.execute("DELETE FROM users WHERE id = ?", (user_id,))
-        db.commit()
-        return True
-    except database.INTEGRITY_ERRORS:
-        db.rollback()
-        return False
 
 
 def update_user_account(user_id, name, email, role):
@@ -166,7 +136,7 @@ def set_user_active(user_id, is_active):
     db = get_db()
     if is_active:
         cursor = db.execute(
-            "UPDATE users SET is_active = 1 WHERE id = ? AND deleted_at IS NULL",
+            "UPDATE users SET is_active = 1, deleted_at = NULL WHERE id = ?",
             (user_id,),
         )
     else:

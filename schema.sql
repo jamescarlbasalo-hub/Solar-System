@@ -21,7 +21,9 @@ CREATE TABLE events (
     end_time    TEXT NOT NULL,
     location    TEXT NOT NULL,
     description TEXT,
-    created_by  INTEGER NOT NULL,
+    created_by  INTEGER,
+    created_by_name TEXT,
+    created_by_role TEXT,
     status      TEXT NOT NULL DEFAULT 'Pending' CHECK (status IN ('Pending', 'Approved', 'Rejected')),
     created_at  TEXT NOT NULL DEFAULT (datetime('now')),
     FOREIGN KEY (created_by) REFERENCES users (id)
@@ -31,7 +33,8 @@ CREATE TABLE announcements (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     title      TEXT NOT NULL,
     content    TEXT NOT NULL,
-    posted_by  INTEGER NOT NULL,
+    posted_by  INTEGER,
+    posted_by_name TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     FOREIGN KEY (posted_by) REFERENCES users (id)
 );

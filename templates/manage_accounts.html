@@ -89,12 +89,12 @@
               </form>
               {% if u.role == 'staff' %}
                 <form method="POST" action="{{ url_for('delete_account', user_id=u.id) }}"
-                      onsubmit="if (!confirm('Delete this staff account? They will lose access, but their events and history will remain unchanged.')) return false; const button = this.querySelector('button[type=submit]'); button.disabled = true; button.textContent = 'Deleting…'; return true;">
+                      onsubmit="if (!confirm('Permanently delete this staff account? Their events and announcements will remain with the creator name saved for history. This cannot be undone.')) return false; const button = this.querySelector('button[type=submit]'); button.disabled = true; button.textContent = 'Deleting…'; return true;">
                   <button type="submit" class="btn btn-small btn-ghost-danger">Delete</button>
                 </form>
               {% elif u.role == 'student' %}
                 <form method="POST" action="{{ url_for('delete_account', user_id=u.id) }}"
-                      onsubmit="if (!confirm('Delete {{ u.email }}?')) return false; const button = this.querySelector('button[type=submit]'); button.disabled = true; button.textContent = 'Deleting…'; return true;">
+                      onsubmit="if (!confirm('Permanently delete {{ u.email }}? This cannot be undone.')) return false; const button = this.querySelector('button[type=submit]'); button.disabled = true; button.textContent = 'Deleting…'; return true;">
                   <button type="submit" class="btn btn-small btn-ghost-danger">Delete</button>
                 </form>
               {% endif %}
@@ -108,28 +108,6 @@
     </table>
   </div>
 </section>
-
-{% if deleted_staff %}
-<section class="recent-section manage-accounts-archive" style="margin-top: 18px;">
-  <h2>Deleted staff accounts ({{ deleted_staff|length }})</h2>
-  <p class="hint-text">These accounts can no longer sign in. Their submitted events and history are preserved.</p>
-  <div class="table-wrap">
-    <table class="data-table">
-      <thead><tr><th>Name</th><th>Email</th><th>Status</th><th>Deleted</th></tr></thead>
-      <tbody>
-      {% for u in deleted_staff %}
-        <tr class="row-inactive">
-          <td>{{ u.name }}</td>
-          <td>{{ u.email }}</td>
-          <td><span class="status-pill status-rejected">Deleted</span></td>
-          <td>{{ u.deleted_at[:10] if u.deleted_at else '—' }}</td>
-        </tr>
-      {% endfor %}
-      </tbody>
-    </table>
-  </div>
-</section>
-{% endif %}
 
 {% endblock %}
 
