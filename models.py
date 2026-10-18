@@ -1,253 +1,146 @@
 from datetime import datetime, timezone
 
 from werkzeug.security import generate_password_hash, check_password_hash
-import database
-from database import get_db
+
+from store import store
 
 VALID_ROLES = ("admin", "staff", "student")
 
 
 def create_user(name, email, password, role):
-    """
-    Adds a new user. The password is hashed before it's stored — the
-    real password is never saved anywhere, only a one-way scrambled
-    version that can be checked against but not reversed.
-
-    Returns the new user's id, or None if the email is already taken
-    (emails must be unique).
-    """
-    db = get_db()
-    password_hash = generate_password_hash(password)
-    try:
-        cursor = db.execute(
-            "INSERT INTO users (name, email, password_hash, role) VALUES (?, ?, ?, ?) RETURNING id",
-            (name, email, password_hash, role),
-        )
-        user_id = cursor.fetchone()["id"]
-        db.commit()
-        return user_id
-    except database.INTEGRITY_ERRORS:
-        # This fires if the UNIQUE constraint on `email` is violated.
+    if get_user_by_email(email):
         return None
+    now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    row = store.add("users", {
+        "name": name, "email": email, "password_hash": generate_password_hash(password),
+        "role": role, "created_at": now, "is_active": 1, "deleted_at": None,
+        "last_profile_update": None, "last_name_change": None,
+        "must_change_password": 0, "session_version": 0,
+    })
+    return row["id"]
 
 
 def get_user_by_email(email):
-    db = get_db()
-    row = db.execute("SELECT * FROM users WHERE email = ?", (email,)).fetchone()
-    return row
+    normalized = (email or "").casefold()
+    return next((row for row in store.all("users")
+                 if row["email"].casefold() == normalized), None)
 
 
 def get_user_by_id(user_id):
-    db = get_db()
-    row = db.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
-    return row
+    return store.get("users", user_id)
 
 
 def get_all_users(role=None, include_deleted=True):
-    """All user rows, optionally filtered to one role.
-
-    Legacy soft-deleted rows remain visible so an admin can permanently
-    remove them or reactivate them after clearing their old deletion marker.
-    """
-    db = get_db()
-    conditions = []
-    params = []
+    rows = store.all("users")
     if not include_deleted:
-        conditions.append("deleted_at IS NULL")
+        rows = [row for row in rows if row["deleted_at"] is None]
     if role:
-        conditions.append("role = ?")
-        params.append(role)
-    where = f" WHERE {' AND '.join(conditions)}" if conditions else ""
-    return db.execute(
-        f"SELECT * FROM users{where} ORDER BY role, name", params
-    ).fetchall()
+        rows = [row for row in rows if row["role"] == role]
+    return sorted(rows, key=lambda row: (row["role"], row["name"].casefold()))
 
 
 def count_users_by_role(role):
-    db = get_db()
-    row = db.execute(
-        "SELECT COUNT(*) AS total FROM users WHERE role = ? AND deleted_at IS NULL",
-        (role,),
-    ).fetchone()
-    return row["total"]
+    return sum(row["role"] == role and row["deleted_at"] is None
+               for row in store.all("users"))
 
 
 def delete_user(user_id):
-    """Permanently delete an account while retaining authored content.
-
-    Creator names/roles are snapshotted on events and announcements before
-    unlinking them. One transaction also removes account-specific reset
-    tokens and clears legacy audit references. Database failures are rolled
-    back and re-raised to the route.
-    """
-    db = get_db()
-    target = db.execute("SELECT id, name, role, email FROM users WHERE id = ?", (user_id,)).fetchone()
+    """Permanently remove the account, retaining authored event history."""
+    target = get_user_by_id(user_id)
     if target is None:
         return False
-    try:
-        db.execute(
-            """UPDATE events
-                  SET created_by_name = COALESCE(created_by_name, ?),
-                      created_by_role = COALESCE(created_by_role, ?),
-                      created_by = NULL
-                WHERE created_by = ?""",
-            (target["name"], target["role"], user_id),
-        )
-        db.execute(
-            """UPDATE announcements
-                  SET posted_by_name = COALESCE(posted_by_name, ?), posted_by = NULL
-                WHERE posted_by = ?""",
-            (target["name"], user_id),
-        )
-        db.execute("DELETE FROM password_resets WHERE user_id = ? OR created_by_admin_id = ?", (user_id, user_id))
-        db.execute("DELETE FROM audit_logs WHERE actor_id = ? OR target_id = ?", (user_id, user_id))
-        db.execute("UPDATE audit_log SET admin_id = NULL WHERE admin_id = ?", (user_id,))
-        db.execute("UPDATE audit_log SET target_user_id = NULL WHERE target_user_id = ?", (user_id,))
-        db.execute("DELETE FROM admin_password_recoveries WHERE lower(admin_email) = lower(?)", (target["email"],))
-        cursor = db.execute("DELETE FROM users WHERE id = ?", (user_id,))
-        db.commit()
-        return cursor.rowcount == 1
-    except database.DATABASE_ERRORS:
-        db.rollback()
-        raise
+    for event in store.all("events"):
+        if event["created_by"] == user_id:
+            store.update("events", event["id"], {
+                "created_by_name": event.get("created_by_name") or target["name"],
+                "created_by_role": event.get("created_by_role") or target["role"],
+                "created_by": None,
+            })
+    for announcement in store.all("announcements"):
+        if announcement.get("posted_by") == user_id:
+            store.update("announcements", announcement["id"], {
+                "posted_by_name": announcement.get("posted_by_name") or target["name"],
+                "posted_by": None,
+            })
+    store.remove_where("password_resets", lambda row:
+                       row.get("user_id") == user_id or row.get("created_by_admin_id") == user_id)
+    store.remove_where("audit_logs", lambda row:
+                       row.get("actor_id") == user_id or row.get("target_id") == user_id)
+    store.update_where("audit_log", lambda row: row.get("admin_id") == user_id,
+                       {"admin_id": None})
+    store.update_where("audit_log", lambda row: row.get("target_user_id") == user_id,
+                       {"target_user_id": None})
+    store.remove_where("admin_password_recoveries", lambda row:
+                       row.get("admin_email", "").casefold() == target["email"].casefold())
+    return store.remove("users", user_id) is not None
 
 
 def update_user_account(user_id, name, email, role):
-    """Admin-side edit: change another account's name, email, and role.
-    Returns True on success, False if that email is already taken by a
-    *different* account (the UNIQUE constraint on email catches this —
-    updating a user to the email they already have is not a conflict)."""
-    db = get_db()
-    try:
-        db.execute(
-            "UPDATE users SET name = ?, email = ?, role = ? WHERE id = ?",
-            (name, email, role, user_id),
-        )
-        db.commit()
-        return True
-    except database.INTEGRITY_ERRORS:
+    conflict = next((row for row in store.all("users")
+                     if row["email"].casefold() == email.casefold()
+                     and row["id"] != user_id), None)
+    if conflict:
         return False
+    return store.update("users", user_id, {"name": name, "email": email, "role": role}) is not None
 
 
 def set_user_active(user_id, is_active):
-    """Deactivate or reactivate an account without deleting it — their
-    row and event history stay intact, they just can't log in while
-    is_active is 0."""
-    db = get_db()
-    if is_active:
-        cursor = db.execute(
-            "UPDATE users SET is_active = 1, deleted_at = NULL WHERE id = ?",
-            (user_id,),
-        )
-    else:
-        cursor = db.execute("UPDATE users SET is_active = 0 WHERE id = ?", (user_id,))
-    db.commit()
-    return cursor.rowcount == 1
+    user = get_user_by_id(user_id)
+    if user is None:
+        return False
+    return store.update("users", user_id, {
+        "is_active": int(bool(is_active)),
+        "deleted_at": None if is_active else user["deleted_at"],
+    }) is not None
 
 
 def update_own_profile(user_id, name, email):
-    """Self-service edit of your own name/email. Deliberately does not
-    accept a role — only Admin can change roles, via update_user_account
-    above. Same email-uniqueness handling as update_user_account."""
-    db = get_db()
-    try:
-        db.execute(
-            "UPDATE users SET name = ?, email = ? WHERE id = ?",
-            (name, email, user_id),
-        )
-        db.commit()
-        return True
-    except database.INTEGRITY_ERRORS:
+    conflict = next((row for row in store.all("users")
+                     if row["email"].casefold() == email.casefold()
+                     and row["id"] != user_id), None)
+    if conflict:
         return False
+    return store.update("users", user_id, {"name": name, "email": email}) is not None
 
 
 def set_last_profile_update(user_id, timestamp):
-    """Stamps when a user last used the self-service Account Settings
-    page — used to enforce the 30-day cooldown between self-edits."""
-    db = get_db()
-    db.execute("UPDATE users SET last_profile_update = ? WHERE id = ?", (timestamp, user_id))
-    db.commit()
+    store.update("users", user_id, {"last_profile_update": timestamp})
 
 
 def set_last_name_change(user_id, timestamp):
-    """Record the time a student last changed their own name."""
-    db = get_db()
-    db.execute("UPDATE users SET last_name_change = ? WHERE id = ?", (timestamp, user_id))
-    db.commit()
+    store.update("users", user_id, {"last_name_change": timestamp})
 
 
 def update_password(user_id, new_password):
-    """Hashes and stores a new password the same way create_user() does."""
-    db = get_db()
-    password_hash = generate_password_hash(new_password)
-    db.execute("UPDATE users SET password_hash = ? WHERE id = ?", (password_hash, user_id))
-    db.commit()
+    store.update("users", user_id, {"password_hash": generate_password_hash(new_password)})
 
 
 def admin_reset_password(admin_id, target_id, new_password):
-    """Admin resets a Student's or Staff member's password.
-
-    In ONE database transaction this:
-      1. stores the new password's HASH (never the password itself),
-      2. flags the account so its owner must choose a new password at
-         their next login (must_change_password = 1),
-      3. bumps session_version so any session that account already had
-         open stops working (the Admin's own session is untouched — it
-         belongs to a different row),
-      4. writes an audit_log row: who, whom, when, what, outcome.
-         The password and the hash are never written to the log.
-
-    The `role IN ('student', 'staff')` condition is a second safety net:
-    even if a route let an Admin id through by mistake, an Admin
-    account's password can't be changed by this function.
-
-    Returns True on success, False if no such resettable account exists.
-    Raises a database driver error on failure (after rolling back)."""
-    db = get_db()
-    password_hash = generate_password_hash(new_password)
-    now = datetime.now(timezone.utc).isoformat(timespec="seconds")
-    try:
-        cursor = db.execute(
-            """UPDATE users
-                  SET password_hash = ?,
-                      must_change_password = 1,
-                      session_version = session_version + 1
-                WHERE id = ? AND role IN ('student', 'staff')""",
-            (password_hash, target_id),
-        )
-        if cursor.rowcount != 1:
-            db.rollback()
-            return False
-        db.execute(
-            """INSERT INTO audit_log (admin_id, target_user_id, action, status, created_at)
-               VALUES (?, ?, ?, ?, ?)""",
-            (admin_id, target_id, "admin_password_reset", "success", now),
-        )
-        db.commit()
-        return True
-    except database.DATABASE_ERRORS:
-        db.rollback()
-        raise
+    target = get_user_by_id(target_id)
+    if target is None or target["role"] not in ("student", "staff"):
+        return False
+    store.update("users", target_id, {
+        "password_hash": generate_password_hash(new_password),
+        "must_change_password": 1,
+        "session_version": target["session_version"] + 1,
+    })
+    store.add("audit_log", {
+        "admin_id": admin_id, "target_user_id": target_id,
+        "action": "admin_password_reset", "status": "success",
+        "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+    })
+    return True
 
 
 def complete_forced_password_change(user_id, new_password):
-    """The affected user has chosen their own permanent password: store
-    its hash, clear the must-change flag, and bump session_version so
-    any other session still using the temporary password is cut off."""
-    db = get_db()
-    password_hash = generate_password_hash(new_password)
-    db.execute(
-        """UPDATE users
-              SET password_hash = ?,
-                  must_change_password = 0,
-                  session_version = session_version + 1
-            WHERE id = ?""",
-        (password_hash, user_id),
-    )
-    db.commit()
+    user = get_user_by_id(user_id)
+    if user is not None:
+        store.update("users", user_id, {
+            "password_hash": generate_password_hash(new_password),
+            "must_change_password": 0,
+            "session_version": user["session_version"] + 1,
+        })
 
 
 def verify_password(user_row, password):
-    """Checks a plain-text password against the stored hash.
-    Returns True/False — never compares raw passwords directly."""
     return check_password_hash(user_row["password_hash"], password)

@@ -9,7 +9,7 @@ from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from werkzeug.security import generate_password_hash
 
-import database
+from store import store
 from models import (
     get_user_by_email, get_user_by_id, verify_password, count_users_by_role,
     create_user, get_all_users, delete_user,
@@ -43,10 +43,6 @@ app.config["MAX_CONTENT_LENGTH"] = 1 * 1024 * 1024
 # website. A second layer on top of the CSRF tokens below.
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 app.config["SESSION_COOKIE_SECURE"] = bool(os.environ.get("RENDER"))
-
-database.init_app(app)  # makes sure the DB connection closes after each request
-database.ensure_schema_migrations()  # creates fresh tables and applies safe migrations
-
 
 def bootstrap_admin_from_environment():
     """Create the first production admin from Render environment settings."""
@@ -82,60 +78,34 @@ def recover_admin_from_environment():
     from datetime import datetime, timezone
 
     token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
-    with app.app_context():
-        db = database.get_db()
-        try:
-            # Serialize startup workers so this token can only be consumed once.
-            database.begin_serialized(db, lock_id=734129)
-            already_used = db.execute(
-                "SELECT 1 FROM admin_password_recoveries WHERE token_hash = ?",
-                (token_hash,),
-            ).fetchone()
-            if already_used:
-                db.rollback()
-                print("Admin recovery token was already used; no password was changed.")
-                return
+    if any(row["token_hash"] == token_hash
+           for row in store.all("admin_password_recoveries")):
+        print("Admin recovery token was already used in this process; no password was changed.")
+        return
+    admin = get_user_by_email(email)
+    if admin is None or admin["role"] != "admin":
+        print("Admin recovery skipped: no admin account matches the recovery email.")
+        return
 
-            admin = db.execute(
-                "SELECT id FROM users WHERE lower(email) = ? AND role = 'admin'",
-                (email,),
-            ).fetchone()
-            if admin is None:
-                db.rollback()
-                print("Admin recovery skipped: no admin account matches the recovery email.")
-                return
-
-            user_columns = database.table_columns(db, "users")
-            assignments = ["password_hash = ?"]
-            values = [generate_password_hash(password)]
-            if "session_version" in user_columns:
-                assignments.append("session_version = COALESCE(session_version, 0) + 1")
-            if "must_change_password" in user_columns:
-                assignments.append("must_change_password = 0")
-            values.extend([admin["id"], email])
-            cursor = db.execute(
-                f"UPDATE users SET {', '.join(assignments)} "
-                "WHERE id = ? AND lower(email) = ? AND role = 'admin'",
-                values,
-            )
-            if cursor.rowcount != 1:
-                db.rollback()
-                print("Admin recovery skipped: the matching admin account could not be updated.")
-                return
-
-            db.execute(
-                "INSERT INTO admin_password_recoveries (token_hash, admin_email, used_at) "
-                "VALUES (?, ?, ?)",
-                (token_hash, email, datetime.now(timezone.utc).isoformat(timespec="seconds")),
-            )
-            db.commit()
-            print("Admin password recovery completed for the configured account.")
-        except Exception:
-            db.rollback()
-            raise
+    store.update("users", admin["id"], {
+        "password_hash": generate_password_hash(password),
+        "session_version": admin["session_version"] + 1,
+        "must_change_password": 0,
+    })
+    store.add("admin_password_recoveries", {
+        "token_hash": token_hash,
+        "admin_email": email,
+        "used_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+    })
+    print("Admin password recovery completed for the configured account.")
 
 
 recover_admin_from_environment()
+
+# Populate predictable sample records only in local development. This runs
+# in the same process as Flask so those records are available to its routes.
+from seed import seed_development_data
+seed_development_data()
 
 # Limits how many requests one IP address can make in a given window.
 # default_limits applies everywhere unless a route sets its own tighter
@@ -572,20 +542,15 @@ def delete_account(user_id):
         elif target["role"] == "admin":
             flash("Admin accounts can't be deleted from Manage Accounts.", "error")
         else:
-            try:
-                deleted = delete_user(user_id)
-            except database.DATABASE_ERRORS:
-                app.logger.exception("Permanent account deletion failed for user id %s", user_id)
-                flash("The account was not deleted. Please try again.", "error")
+            deleted = delete_user(user_id)
+            if deleted:
+                flash(
+                    f"Account '{target['email']}' was permanently deleted. "
+                    "Its events and announcements were kept with the creator name saved for history.",
+                    "success",
+                )
             else:
-                if deleted:
-                    flash(
-                        f"Account '{target['email']}' was permanently deleted. "
-                        "Its events and announcements were kept with the creator name saved for history.",
-                        "success",
-                    )
-                else:
-                    flash("That account no longer exists.", "error")
+                flash("That account no longer exists.", "error")
     return redirect(url_for("manage_accounts"))
 
 
@@ -690,14 +655,7 @@ def reset_account_password(user_id):
         flash("Please choose how to set the temporary password.", "error")
         return redirect(url_for("manage_accounts"))
 
-    try:
-        reset_done = admin_reset_password(admin["id"], target["id"], temp_password)
-    except database.DATABASE_ERRORS:
-        # Deliberately generic, and the password is never logged.
-        app.logger.error("Password reset failed (database error) for user id %s", target["id"])
-        flash("Something went wrong and the password was not reset. Please try again.", "error")
-        return redirect(url_for("manage_accounts"))
-
+    reset_done = admin_reset_password(admin["id"], target["id"], temp_password)
     if not reset_done:
         flash("That account's password could not be reset.", "error")
         return redirect(url_for("manage_accounts"))
