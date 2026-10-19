@@ -526,12 +526,15 @@ def manage_accounts():
             for e in errors:
                 flash(e, "error")
             return redirect(url_for("manage_accounts"))
-        user_id = create_user(name, email, password, role, must_change_password=True)
+        # A newly created account starts with the password supplied by the
+        # Admin. Forced password changes are reserved for explicit password
+        # resets, so fresh Staff/Student accounts can go straight to their
+        # normal role dashboard after signing in.
+        user_id = create_user(name, email, password, role, must_change_password=False)
         if user_id is None:
             flash("That email is already registered.", "error")
         else:
-            record_account_password_notice(email, password)
-            flash(f"{role.capitalize()} account created for {name}. The account holder must set a new password at first sign-in.", "success")
+            flash(f"{role.capitalize()} account created for {name}. They can sign in with the password you provided and change it later in Account Settings.", "success")
         return redirect(url_for("manage_accounts"))
 
     users = get_all_users()

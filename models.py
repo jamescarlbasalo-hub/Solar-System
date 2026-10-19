@@ -137,13 +137,14 @@ def admin_reset_password(admin_id, target_id, new_password):
 
 
 def record_account_password_notice(email, temporary_password):
-    """Keep the current temporary password in memory for the admin to retrieve."""
+    """Keep a reset-generated temporary password for the admin to retrieve."""
     normalized_email = (email or "").casefold()
     store.remove_where("account_password_notices", lambda row:
                        row.get("email", "").casefold() == normalized_email)
     store.add("account_password_notices", {
         "email": email,
         "temporary_password": temporary_password,
+        "source": "password_reset",
     })
     # Keep the dashboard notice list small and relevant for this temporary store.
     notices = store.all("account_password_notices")
@@ -152,7 +153,10 @@ def record_account_password_notice(email, temporary_password):
 
 
 def get_recent_account_password_notices(limit=20):
-    return sorted(store.all("account_password_notices"),
+    # Ignore older account-creation notices that predate the reset-only rule.
+    reset_notices = [row for row in store.all("account_password_notices")
+                     if row.get("source") == "password_reset"]
+    return sorted(reset_notices,
                   key=lambda row: row["id"], reverse=True)[:limit]
 
 

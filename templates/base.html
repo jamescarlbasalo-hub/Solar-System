@@ -58,7 +58,7 @@
           </button>
           <section class="account-notification-panel" id="account-notification-panel" hidden aria-label="Account password notices">
             <header><strong>Account notices</strong><span>{{ current_user.name }}</span></header>
-            <p class="notification-help">Active temporary passwords for accounts created or reset by an Admin. They are removed when the account holder changes the password or when the app restarts.</p>
+            <p class="notification-help">Temporary passwords appear here only after an Admin resets an account. They are removed when the account holder changes the password or when the app restarts.</p>
             <ul>
               {% for notice in account_password_notices %}
               <li>
