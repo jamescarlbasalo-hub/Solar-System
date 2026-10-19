@@ -45,12 +45,12 @@
   <h2>Needs your review</h2>
   <div class="table-wrap">
     <table class="data-table">
-      <thead><tr><th>Title</th><th>Date</th><th>Actions</th></tr></thead>
+      <thead><tr><th>Title</th><th>Date &amp; time</th><th>Actions</th></tr></thead>
       <tbody>
       {% for e in recent_pending %}
         <tr>
           <td><a href="{{ url_for('event_detail', event_id=e.id) }}">{{ e.title }}</a></td>
-          <td>{{ e.date }}</td>
+          <td>{{ e.date }} · {% if e.start_time == 'TBA' or e.end_time == 'TBA' %}<span class="tba-badge tba-badge-inline">TBA</span>{% else %}{{ event_time_display(e) }}{% endif %}</td>
           <td class="row-actions">
             <a href="{{ url_for('edit_event', event_id=e.id) }}" class="btn btn-small">Edit</a>
 
