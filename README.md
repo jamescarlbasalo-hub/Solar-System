@@ -13,15 +13,20 @@ pip install -r requirements.txt
 python app.py
 ```
 
-Open **http://127.0.0.1:5000**. Local development starts with sample accounts
-and events so you can demonstrate each role. Demo passwords are for local
-demonstration only; never use them as personal passwords.
+Open **http://127.0.0.1:5000**. The app starts with sample accounts and events
+for demonstrations. These preset Staff and Student accounts are seeded locally
+and on Render every time the app process starts.
 
 | Role | Email | Demo password |
 |---|---|---|
 | Admin | admin@schoolsync.edu | admin123 |
-| Staff | staff@schoolsync.edu | staff123 |
-| Student | student@schoolsync.edu | student123 |
+| Staff | demo.staff@schoolsync.edu | DemoStaff2026! |
+| Student | demo.student@schoolsync.edu | DemoStudent2026! |
+
+The preset accounts use public, fixed demo credentials. Anyone who knows the
+credentials can sign in, so use them only for a demonstration with non-sensitive
+sample data. Each app restart recreates these two accounts with their preset
+passwords; other user-created accounts and all events are still cleared.
 
 Students can sign up at `/signup`; self-signup only creates Student accounts.
 Admins create Staff and Admin accounts from Manage Accounts.
@@ -52,7 +57,7 @@ models.py       User account creation, lookup, update, removal and password logi
 events.py       Event CRUD, filtering and role-based permissions
 auth_reset.py   In-memory password reset token helpers
 utils.py        Flask decorators, CSRF, validation and password helpers
-seed.py         Development sample accounts and events, initialized in app process
+seed.py         Seeds demo accounts in every environment and sample events locally
 requirements.txt
 templates/      HTML pages
 static/         CSS and images
@@ -87,6 +92,8 @@ separate until you choose to remove it in Render.
 - Set `SCHOOLSYNC_ADMIN_EMAIL` and `SCHOOLSYNC_ADMIN_PASSWORD` to initialize
   the Admin account in the running process. Optionally set
   `SCHOOLSYNC_ADMIN_NAME`.
+- The demo Staff and Student accounts are seeded automatically on Render
+  startup. Use the credentials in the table above for demonstrations.
 - `DATABASE_URL` is not used by this version.
 
 Announcements are reserved in the in-memory store but are not yet implemented

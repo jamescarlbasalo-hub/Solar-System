@@ -1,8 +1,8 @@
-"""Seed temporary development accounts and sample events using Python lists.
+"""Seed preset demo accounts and local sample events into Python lists.
 
 The records exist only for the lifetime of this Python process. Running this
-script starts a fresh process, so use app startup environment settings for a
-Render admin account and create demo records in the running app as needed.
+script starts a fresh process. The preset demo Staff and Student accounts are
+recreated on every app startup, including Render, to support demonstrations.
 """
 import os
 from datetime import date, timedelta
@@ -10,6 +10,18 @@ from datetime import date, timedelta
 from events import create_event
 from models import create_user, get_user_by_email
 from store import store
+
+DEMO_ACCOUNTS = [
+    ("Demo Staff", "demo.staff@schoolsync.edu", "DemoStaff2026!", "staff"),
+    ("Demo Student", "demo.student@schoolsync.edu", "DemoStudent2026!", "student"),
+]
+
+
+def seed_demo_accounts():
+    """Ensure the preset demo Staff and Student exist in this process."""
+    for name, email, password, role in DEMO_ACCOUNTS:
+        if get_user_by_email(email) is None:
+            create_user(name, email, password, role)
 
 
 def create_event_once(title, date_value, start_time, end_time, location,
@@ -24,19 +36,22 @@ def create_event_once(title, date_value, start_time, end_time, location,
 
 
 def seed_development_data():
+    # These demo accounts are added in every environment. They are useful
+    # after a Render restart because all in-memory records start empty.
+    seed_demo_accounts()
+
+    # Only the local development app gets the demo Admin and sample events.
     if os.environ.get("RENDER"):
         return
     demo_accounts = [
         ("School Administrator", "admin@schoolsync.edu", "admin123", "admin"),
-        ("Mr. Santos (Staff)", "staff@schoolsync.edu", "staff123", "staff"),
-        ("Liza Fernandez (Student)", "student@schoolsync.edu", "student123", "student"),
     ]
     for name, email, password, role in demo_accounts:
         if get_user_by_email(email) is None:
             create_user(name, email, password, role)
 
     admin = get_user_by_email("admin@schoolsync.edu")
-    staff = get_user_by_email("staff@schoolsync.edu")
+    staff = get_user_by_email("demo.staff@schoolsync.edu")
     today = date.today()
     if admin and staff:
         samples = [
