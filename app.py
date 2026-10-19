@@ -9,6 +9,7 @@ from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from werkzeug.security import generate_password_hash
 
+from account_types import account_from_record
 from store import store
 from models import (
     get_user_by_email, get_user_by_id, verify_password, count_users_by_role,
@@ -370,9 +371,9 @@ def new_event():
             return render_template("event_form.html", form=request.form, mode="new")
 
         user = current_user()
-        # Admin-created events go live immediately — an Admin approving
-        # their own submission would be a formality with no real check.
-        status = "Approved" if user["role"] == "admin" else "Pending"
+        # The role-specific account class selects the initial status. Admin
+        # and Staff override the same method with their own workflow behavior.
+        status = account_from_record(user).initial_event_status()
 
         event_id = create_event(title, date_str, start_time, end_time, location,
                                  description, user["id"], status)

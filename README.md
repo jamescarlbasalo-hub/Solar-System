@@ -52,6 +52,7 @@ Admins create Staff and Admin accounts from Manage Accounts.
 
 ```text
 app.py          Flask routes, login, role dashboards, event and account actions
+account_types.py Shared account base class and role-specific event behavior
 store.py        Encapsulated in-memory Python list collections and CRUD methods
 models.py       User account creation, lookup, update, removal and password logic
 events.py       Event CRUD, filtering and role-based permissions
@@ -68,6 +69,14 @@ users, events, announcements, reset tokens, and audit records. Its methods
 provide add, retrieve, update, and remove operations. `models.py` and `events.py`
 use these methods, so Flask routes and templates retain the same flow without
 issuing SQL.
+
+`account_types.py` demonstrates inheritance and polymorphism. `AdminAccount`,
+`StaffAccount`, and `StudentAccount` inherit shared account behavior from
+`UserAccount`. Admin and Staff override `initial_event_status()`: it returns
+`Approved` for Admin and `Pending` for Staff. In `app.py`, the event route calls
+that same method on the role-specific object, so each class supplies its own
+behavior while the form and approval flow remain unchanged. The base class also
+keeps its record in a private attribute and exposes only the needed properties.
 
 ## Important temporary-storage limitation
 
