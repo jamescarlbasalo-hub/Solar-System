@@ -20,6 +20,7 @@ class InMemoryStore:
             "audit_log": [],
             "audit_logs": [],
             "admin_password_recoveries": [],
+            "account_password_notices": [],
         }
         self.__next_ids = {name: 1 for name in self.__collections}
 

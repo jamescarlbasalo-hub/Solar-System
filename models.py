@@ -7,7 +7,7 @@ from store import store
 VALID_ROLES = ("admin", "staff", "student")
 
 
-def create_user(name, email, password, role):
+def create_user(name, email, password, role, must_change_password=False):
     if get_user_by_email(email):
         return None
     now = datetime.now(timezone.utc).isoformat(timespec="seconds")
@@ -15,7 +15,8 @@ def create_user(name, email, password, role):
         "name": name, "email": email, "password_hash": generate_password_hash(password),
         "role": role, "created_at": now, "is_active": 1, "deleted_at": None,
         "last_profile_update": None, "last_name_change": None,
-        "must_change_password": 0, "session_version": 0,
+        "must_change_password": int(bool(must_change_password)), "session_version": 0,
+        "password_reset_pending": 0,
     })
     return row["id"]
 
@@ -72,6 +73,8 @@ def delete_user(user_id):
                        {"target_user_id": None})
     store.remove_where("admin_password_recoveries", lambda row:
                        row.get("admin_email", "").casefold() == target["email"].casefold())
+    store.remove_where("account_password_notices", lambda row:
+                       row.get("email", "").casefold() == target["email"].casefold())
     return store.remove("users", user_id) is not None
 
 
@@ -122,6 +125,7 @@ def admin_reset_password(admin_id, target_id, new_password):
     store.update("users", target_id, {
         "password_hash": generate_password_hash(new_password),
         "must_change_password": 1,
+        "password_reset_pending": 1,
         "session_version": target["session_version"] + 1,
     })
     store.add("audit_log", {
@@ -132,14 +136,37 @@ def admin_reset_password(admin_id, target_id, new_password):
     return True
 
 
+def record_account_password_notice(email, temporary_password):
+    """Keep the current temporary password in memory for the admin to retrieve."""
+    normalized_email = (email or "").casefold()
+    store.remove_where("account_password_notices", lambda row:
+                       row.get("email", "").casefold() == normalized_email)
+    store.add("account_password_notices", {
+        "email": email,
+        "temporary_password": temporary_password,
+    })
+    # Keep the dashboard notice list small and relevant for this temporary store.
+    notices = store.all("account_password_notices")
+    for notice in notices[:-50]:
+        store.remove("account_password_notices", notice["id"])
+
+
+def get_recent_account_password_notices(limit=20):
+    return sorted(store.all("account_password_notices"),
+                  key=lambda row: row["id"], reverse=True)[:limit]
+
+
 def complete_forced_password_change(user_id, new_password):
     user = get_user_by_id(user_id)
     if user is not None:
         store.update("users", user_id, {
             "password_hash": generate_password_hash(new_password),
             "must_change_password": 0,
+            "password_reset_pending": 0,
             "session_version": user["session_version"] + 1,
         })
+        store.remove_where("account_password_notices", lambda row:
+                           row.get("email", "").casefold() == user["email"].casefold())
 
 
 def verify_password(user_row, password):

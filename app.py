@@ -14,6 +14,7 @@ from store import store
 from models import (
     get_user_by_email, get_user_by_id, verify_password, count_users_by_role,
     create_user, get_all_users, delete_user,
+    record_account_password_notice, get_recent_account_password_notices,
     update_user_account, set_user_active, update_own_profile, update_password,
     set_last_name_change, admin_reset_password, complete_forced_password_change,
 )
@@ -122,7 +123,9 @@ limiter = Limiter(
 
 @app.context_processor
 def inject_user():
-    return {"current_user": current_user()}
+    user = current_user()
+    notices = get_recent_account_password_notices() if user and user["role"] == "admin" else []
+    return {"current_user": user, "account_password_notices": notices}
 
 
 # Lets any template call event_time_display(event) to print "Time to be
@@ -515,16 +518,20 @@ def manage_accounts():
         password = request.form.get("password", "")
         role = request.form.get("role", "")
 
-        errors = validate_signup_fields(name, email, password, role)
+        errors = validate_profile_fields(name, email)
+        if role not in ("admin", "staff", "student"):
+            errors.append("Invalid role selected.")
+        errors.extend(validate_temporary_password(password))
         if errors:
             for e in errors:
                 flash(e, "error")
+            return redirect(url_for("manage_accounts"))
+        user_id = create_user(name, email, password, role, must_change_password=True)
+        if user_id is None:
+            flash("That email is already registered.", "error")
         else:
-            user_id = create_user(name, email, password, role)
-            if user_id is None:
-                flash("That email is already registered.", "error")
-            else:
-                flash(f"{role.capitalize()} account created for {name}.", "success")
+            record_account_password_notice(email, password)
+            flash(f"{role.capitalize()} account created for {name}. The account holder must set a new password at first sign-in.", "success")
         return redirect(url_for("manage_accounts"))
 
     users = get_all_users()
@@ -660,6 +667,7 @@ def reset_account_password(user_id):
     if not reset_done:
         flash("That account's password could not be reset.", "error")
         return redirect(url_for("manage_accounts"))
+    record_account_password_notice(target["email"], temp_password)
 
     # Rendered directly (not redirected) so the temporary password is
     # never placed in the session cookie. no-store tells browsers and
